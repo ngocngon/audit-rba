@@ -110,7 +110,7 @@ function fmtEx(list){
   if(!list||!list.length)return '';
   const cut=(t,n)=>t&&t.length>n?t.slice(0,n-1)+'…':(t||'');
   return `MẪU LỖI ĐÃ ĐƯỢC NGƯỜI ĐÁNH GIÁ CỦA ĐỘI XÁC NHẬN (ưu tiên cùng khu vực, cùng đối tác; dùng làm chuẩn chọn mã, mức độ, văn phong và cách khắc phục; ảnh có tình huống tương tự thì báo đúng như mẫu)
-${list.map(x=>`- [${x.req||x.code||'?'} | ${x.sev||'?'}${x.kind==='hazard'?' | mối nguy':''}] ${cut(x.title,160)}${x.area?` (khu: ${cut(x.area,40)})`:''}${x.vendor?' (cùng đối tác)':''}${x.from?` — AI từng gán ${[x.from.code,x.from.sev].filter(Boolean).join('/')} và đã được sửa thành ${[x.code,x.sev].filter(Boolean).join('/')}`:''}${x.fixNow?` → ngay: ${cut(x.fixNow,100)}`:''}${x.fixRoot?`; triệt để: ${cut(x.fixRoot,120)}`:''}`).join('\n')}
+${list.map(x=>`- [${[x.rule,x.req||x.code||'?',x.sev||'?'].filter(Boolean).join(' | ')}${x.kind==='hazard'?' | mối nguy':''}] ${cut(x.title,160)}${x.area?` (khu: ${cut(x.area,40)})`:''}${x.vendor?' (cùng đối tác)':''}${x.from?` — AI từng gán ${[x.from.rule,x.from.code,x.from.sev].filter(Boolean).join('/')}${x.from.title&&x.from.title!==x.title?` ("${cut(x.from.title,70)}")`:''} và đã được người đánh giá sửa thành ${[x.rule,x.code,x.sev].filter(Boolean).join('/')}`:''}${x.fixNow?` → ngay: ${cut(x.fixNow,100)}`:''}${x.fixRoot?`; triệt để: ${cut(x.fixRoot,120)}`:''}`).join('\n')}
 
 `;
 }
@@ -196,11 +196,10 @@ const AIEV={q:(()=>{try{return JSON.parse(localStorage.getItem('soat-ehs-aiev')|
   async flush(){const vw=typeof CL!=='undefined'&&CL.auth&&CL.auth.user&&CL.auth.user.role==='viewer';if(!this.q.length||typeof clOn!=='function'||!clOn()||NET.off||vw){if(vw){this.q=[];this.save()}return}
     const b=this.q.slice(0,200);try{await api('POST','/api/ai/events',{events:b});this.q=this.q.slice(b.length);this.save()}catch{}}
 };
-{const _learn=learn;learn=function(f,p){
-  try{if(p&&!p.sample&&!f.learned&&String(f.title||'').trim()){const area=(p.area||'').trim(),title=f.title.trim();
-    if(f.src==='ai'&&f.ai0){const a=f.ai0,same=a.req===f.req&&a.code===f.code&&a.sev===f.sev;AIEV.push({t:same?'keep':'fix',code:f.code||'',sev:f.sev||'',from_code:a.code||'',from_sev:a.sev||'',area,title})}
-    else if(f.src==='manual'&&p.analysis)AIEV.push({t:'miss',code:f.code||'',sev:f.sev||'',area,title})}}catch{}
-  return _learn(f,p)}}
+{const _learn=learn;learn=function(f,p,quiet){
+  const r=_learn(f,p,quiet);
+  try{if(r&&r.t)AIEV.push({t:r.t,code:(r.to&&r.to.code)||f.code||'',sev:(r.to&&r.to.sev)||f.sev||'',from_code:(r.from&&r.from.code)||'',from_sev:(r.from&&r.from.sev)||'',area:r.area||'',title:r.title||''})}catch{}
+  return r}}
 {const _add=Learn.add.bind(Learn);Learn.add=function(x){try{if(x&&(x.t==='reject'||x.t==='unclear'))AIEV.push({t:x.t,code:(x.to&&x.to.code)||'',sev:(x.to&&x.to.sev)||'',area:x.area||'',title:x.title||''})}catch{}return _add(x)}}
 setInterval(()=>{if(!document.hidden)AIEV.flush()},60000);
 

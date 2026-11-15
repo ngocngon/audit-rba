@@ -40,10 +40,30 @@ const KV_KEYS = { lessons: 'auditor', guider: 'admin', guiderfile: 'admin', sys:
 let schemaReady = null;
 function ensureSchema(env) {
   if (!schemaReady) {
-    schemaReady = Promise.all([
-      env.DB.prepare("ALTER TABLE photos ADD COLUMN thumb TEXT NOT NULL DEFAULT ''").run().catch(() => {}),
-      env.DB.prepare("ALTER TABLE photos ADD COLUMN search_text TEXT NOT NULL DEFAULT ''").run().catch(() => {}),
-    ]);
+    schemaReady = (async () => {
+      await Promise.all([
+        env.DB.prepare("ALTER TABLE photos ADD COLUMN thumb TEXT NOT NULL DEFAULT ''").run().catch(() => {}),
+        env.DB.prepare("ALTER TABLE photos ADD COLUMN search_text TEXT NOT NULL DEFAULT ''").run().catch(() => {}),
+        env.DB.prepare("ALTER TABLE photos ADD COLUMN n_pri INTEGER NOT NULL DEFAULT 0").run().catch(() => {}),
+        env.DB.prepare("ALTER TABLE photos ADD COLUMN n_maj INTEGER NOT NULL DEFAULT 0").run().catch(() => {}),
+        env.DB.prepare("ALTER TABLE photos ADD COLUMN n_min INTEGER NOT NULL DEFAULT 0").run().catch(() => {}),
+      ]);
+      try {
+        const rows = (await env.DB.prepare('SELECT audit_id, id, data FROM photos WHERE deleted=0 AND n_f>0 AND n_pri=0 AND n_maj=0 AND n_min=0 LIMIT 300').all()).results || [];
+        if (rows.length) {
+          const stmts = [];
+          for (const r of rows) {
+            let d; try { d = JSON.parse(r.data || '{}'); } catch { continue; }
+            const fs = Array.isArray(d.findings) ? d.findings : [];
+            const p = fs.filter(x => x && x.sev === 'Priority').length;
+            const ma = fs.filter(x => x && x.sev === 'Major').length;
+            const mi = fs.filter(x => x && x.sev === 'Minor').length;
+            if (p || ma || mi) stmts.push(env.DB.prepare('UPDATE photos SET n_pri=?, n_maj=?, n_min=? WHERE audit_id=? AND id=?').bind(p, ma, mi, r.audit_id, r.id));
+          }
+          if (stmts.length) await env.DB.batch(stmts);
+        }
+      } catch {}
+    })();
   }
   return schemaReady;
 }
@@ -169,6 +189,9 @@ const AUDIT_SELECT = `SELECT a.*, u.name AS owner_name, u.email AS owner_email,
   (SELECT COUNT(*) FROM photos p WHERE p.audit_id=a.id AND p.deleted=0) AS n_photos,
   (SELECT COALESCE(SUM(n_f),0) FROM photos p WHERE p.audit_id=a.id AND p.deleted=0) AS n_f,
   (SELECT COALESCE(SUM(n_ok),0) FROM photos p WHERE p.audit_id=a.id AND p.deleted=0) AS n_ok,
+  (SELECT COALESCE(SUM(n_pri),0) FROM photos p WHERE p.audit_id=a.id AND p.deleted=0) AS n_pri,
+  (SELECT COALESCE(SUM(n_maj),0) FROM photos p WHERE p.audit_id=a.id AND p.deleted=0) AS n_maj,
+  (SELECT COALESCE(SUM(n_min),0) FROM photos p WHERE p.audit_id=a.id AND p.deleted=0) AS n_min,
   (SELECT GROUP_CONCAT(DISTINCT CASE WHEN p.area='' THEN NULL ELSE p.area END) FROM photos p WHERE p.audit_id=a.id AND p.deleted=0) AS areas,
   (SELECT GROUP_CONCAT(m.user_id) FROM audit_members m WHERE m.audit_id=a.id) AS members
   FROM audits a LEFT JOIN users u ON u.id=a.owner_id`;
@@ -181,6 +204,7 @@ function auditOut(a, u) {
     owner_id: a.owner_id, owner_name: a.owner_name || a.owner_email || '', members,
     created_at: a.created_at, updated_at: a.updated_at,
     n_photos: a.n_photos || 0, n_f: a.n_f || 0, n_ok: a.n_ok || 0,
+    n_pri: a.n_pri || 0, n_maj: a.n_maj || 0, n_min: a.n_min || 0,
     areas: a.areas ? String(a.areas).split(',') : [], can_edit: edit,
   };
 }
@@ -472,13 +496,16 @@ on('PUT', '/api/audits/:id/photos/:pid', async (req, env, u, p) => {
   const ex = await one(env, 'SELECT upd, deleted FROM photos WHERE audit_id=? AND id=?', a.id, p.pid);
   if (ex && ex.upd > upd && !ex.deleted) return json({ ok: false, stale: true, upd: ex.upd }, 409);
   const f = Array.isArray(d.findings) ? d.findings : [];
+  const nPri = f.filter(x => x && x.sev === 'Priority').length;
+  const nMaj = f.filter(x => x && x.sev === 'Major').length;
+  const nMin = f.filter(x => x && x.sev === 'Minor').length;
   const thumb = typeof d.thumb === 'string' ? d.thumb.slice(0, 150000) : '';
   const searchText = buildSearchText(d);
   const slim = JSON.stringify({ ...d, thumb: '' });
   const t = now();
-  await run(env, `INSERT INTO photos(id,audit_id,area,data,thumb,search_text,n_f,n_ok,upd,srv,updated_by,deleted) VALUES(?,?,?,?,?,?,?,?,?,?,?,0)
-    ON CONFLICT(audit_id,id) DO UPDATE SET area=excluded.area, data=excluded.data, thumb=CASE WHEN excluded.thumb<>'' THEN excluded.thumb ELSE photos.thumb END, search_text=excluded.search_text, n_f=excluded.n_f, n_ok=excluded.n_ok, upd=excluded.upd, srv=excluded.srv, updated_by=excluded.updated_by, deleted=0`,
-    p.pid, a.id, str(d.area, 200), slim, thumb, searchText, f.length, f.filter(x => x && x.ok).length, upd, t, u.id);
+  await run(env, `INSERT INTO photos(id,audit_id,area,data,thumb,search_text,n_f,n_ok,n_pri,n_maj,n_min,upd,srv,updated_by,deleted) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,0)
+    ON CONFLICT(audit_id,id) DO UPDATE SET area=excluded.area, data=excluded.data, thumb=CASE WHEN excluded.thumb<>'' THEN excluded.thumb ELSE photos.thumb END, search_text=excluded.search_text, n_f=excluded.n_f, n_ok=excluded.n_ok, n_pri=excluded.n_pri, n_maj=excluded.n_maj, n_min=excluded.n_min, upd=excluded.upd, srv=excluded.srv, updated_by=excluded.updated_by, deleted=0`,
+    p.pid, a.id, str(d.area, 200), slim, thumb, searchText, f.length, f.filter(x => x && x.ok).length, nPri, nMaj, nMin, upd, t, u.id);
   await run(env, 'UPDATE audits SET updated_at=? WHERE id=?', t, a.id);
   return json({ ok: true, srv: t });
 }, true);
@@ -509,7 +536,7 @@ on('DELETE', '/api/audits/:id/photos/:pid', async (req, env, u, p) => {
   const a = await auditOf(env, p.id);
   await mustEdit(env, u, a);
   const t = now();
-  await run(env, 'UPDATE photos SET deleted=1, thumb=?, search_text=?, img_size=0, srv=?, upd=?, updated_by=? WHERE audit_id=? AND id=?', '', '', t, t, u.id, a.id, p.pid);
+  await run(env, 'UPDATE photos SET deleted=1, thumb=?, search_text=?, img_size=0, n_f=0, n_ok=0, n_pri=0, n_maj=0, n_min=0, srv=?, upd=?, updated_by=? WHERE audit_id=? AND id=?', '', '', t, t, u.id, a.id, p.pid);
   await imgDel(env, a.id, p.pid).catch(() => {});
   return json({ ok: true });
 }, true);
@@ -633,12 +660,13 @@ on('GET', '/api/ai/examples', async (req, env, u) => {
       for (const w of wordsOf(`${f.title} ${r.area}`)) if (ctx.has(w)) s += 3;
       for (const w of aw) if (ctx.has(w)) s += 2;
       if (V && normT(r.vendor) === V) s += 4;
-      if (f.src === 'ai' && f.ai0 && (f.ai0.code !== f.code || f.ai0.sev !== f.sev)) s += 2; // lỗi AI từng gán sai: bài học quý
+      const wasEdited = !!(f.ai0 && (f.ai0.code !== f.code || f.ai0.sev !== f.sev || f.ai0.rule !== f.rule || (f.ai0.title && normT(f.ai0.title) !== normT(f.title))));
+      if (wasEdited) s += 3; // lỗi AI từng gán sai được người đánh giá sửa: bài học ưu tiên cao
       const old = seen.get(key);
       if (old) { old.n++; old.s = Math.max(old.s, s) + 0.5; continue; }
-      seen.set(key, { s, n: 1, title: str(f.title, 220), code: f.code || '', req: f.req || '', sev: f.sev || '', kind: f.kind || '',
+      seen.set(key, { s, n: 1, title: str(f.title, 220), rule: f.rule || '', code: f.code || '', req: f.req || '', sev: f.sev || '', kind: f.kind || '',
         fixNow: str(f.fixNow, 160), fixRoot: str(f.fixRoot, 200), area: str(r.area, 60), vendor: V && normT(r.vendor) === V,
-        from: f.src === 'ai' && f.ai0 && (f.ai0.code !== f.code || f.ai0.sev !== f.sev) ? { code: f.ai0.code || '', sev: f.ai0.sev || '' } : null });
+        from: wasEdited ? { rule: f.ai0.rule || '', code: f.ai0.code || '', sev: f.ai0.sev || '', title: str(f.ai0.title, 160) } : null });
     }
   }
   const list = [...seen.values()].sort((a, b) => b.s - a.s || b.n - a.n).slice(0, n);

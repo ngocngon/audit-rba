@@ -47,7 +47,7 @@ rep('<button data-dv="set" title="Cài đặt hệ thống">',
 # 4. Trang Kho audit và trang Quản trị
 rep('<nav class="tabbar" aria-label="Màn hình">',
     '<section class="cpage" id="cloudPage" aria-label="Kho audit online"><div class="dwrap">\n'
-    '    <div class="dhead"><h2>Kho audit online</h2><small>Đối tác → Lần audit → Khu vực → Ảnh và lỗi</small></div>\n'
+    '    <div class="dhead"><h2>Kho audit online</h2><small>Trung tâm điều phối đợt đánh giá, kiểm soát rủi ro &amp; tra cứu tri thức đội ngũ</small></div>\n'
     '    <div id="cloudB"></div>\n'
     '  </div></section>\n'
     '  <section class="cpage" id="adminPage" aria-label="Quản trị"><div class="dwrap">\n'

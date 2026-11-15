@@ -98,8 +98,44 @@ function qxScore(id,t){const gs=QX_RX[id];if(!gs)return{all:false,obj:false,s:0}
 function qxGuess(text){const t=' '+qn(text)+' ';let best=null;
   for(const id of Object.keys(QX_RX)){if(!RULES[id])continue;const r=qxScore(id,t);if(r.all&&(!best||r.s>best.s))best={id,s:r.s}}
   return best}
+/* Tự động áp dụng bài học từ Sổ kinh nghiệm người đánh giá cho lỗi tương tự về sau */
+function qxLearnFix(f){
+  if(!f||f.src!=='ai'||!Learn||!Array.isArray(Learn.items)||!Learn.items.length)return false;
+  const title=String(f.title||'').trim();if(!title)return false;
+  let best=null,bestS=0,bestFromS=0;
+  for(const x of Learn.items){
+    if(!x||x.t!=='fix'||!x.to)continue;
+    const sFrom=x.fromTitle?tSim(title,x.fromTitle):0;
+    const sTo=x.title?tSim(title,x.title):0;
+    const sameFromRule=!!(x.from&&x.from.rule&&f.rule&&x.from.rule===f.rule);
+    let sc=0;
+    if(sFrom>=0.52&&(!x.from||!x.from.rule||!f.rule||sameFromRule))sc=Math.max(sc,sFrom+0.12);
+    if(sTo>=0.62)sc=Math.max(sc,sTo);
+    if(sameFromRule&&Math.max(sFrom,sTo)>=0.42)sc=Math.max(sc,Math.max(sFrom,sTo)+0.1);
+    if(sc>bestS){best=x;bestS=sc;bestFromS=sFrom}
+  }
+  if(!best||!best.to)return false;
+  const to=best.to,r=to.rule&&RULES[to.rule]?RULES[to.rule]:null;
+  const same=(!to.rule||to.rule===f.rule)&&(!to.code||to.code===f.code)&&(!to.req||to.req===f.req)&&(!to.sev||to.sev===f.sev);
+  if(same&&bestFromS<0.68)return false;
+  const from={rule:f.rule,code:f.code,req:f.req,sev:f.sev,kind:f.kind,title:f.title};
+  if(r){
+    f.rule=r.id;f.code=to.code||r.c;f.req=to.req||r.q;f.law=lawStr(r.l);f.cause=r.z;
+    f.kind=to.kind||(r.kd==='hazard'?'hazard':'violation');
+  }else{
+    if(to.rule)f.rule=to.rule;if(to.code)f.code=to.code;if(to.req)f.req=to.req;if(to.kind)f.kind=to.kind;
+  }
+  if(to.sev&&SEV.includes(to.sev))f.sev=to.sev;else if(r&&(!SEV.includes(f.sev)||CFG.sevLock))f.sev=r.v;
+  if(bestFromS>=0.68&&best.title&&tSim(title,best.title)<0.92)f.title=best.title;
+  if(best.fixNow&&(!str(f.fixNow)||bestFromS>=0.6))f.fixNow=best.fixNow;else if(r&&!str(f.fixNow))f.fixNow=r.n;
+  if(best.fixRoot&&(!str(f.fixRoot)||bestFromS>=0.6))f.fixRoot=best.fixRoot;else if(r&&!str(f.fixRoot))f.fixRoot=r.x;
+  if(CFG.mandRule!=='ai')f.mand=f.sev==='Priority';
+  f.qxLearn={id:best.id,from,to:{rule:f.rule,code:f.code,req:f.req,sev:f.sev},at:Date.now()};
+  return true;
+}
 /* Quyết định có sửa id AI chọn hay không: chỉ sửa khi AI để KHAC/không có id, hoặc vật thể của id AI chọn không có trong nội dung lỗi */
 function qxRuleFix(f){
+  if(f&&f.qxLearn)return false;
   if(!QX.cfg.rules||!f||f.src!=='ai')return false;
   const text=`${f.title||''}. ${f.ev||''}`,b=qxGuess(text);if(!b||b.id===f.rule)return false;
   if(f.rule){const cur=qxScore(f.rule,' '+qn(text)+' ');if(cur.obj||!QX_RX[f.rule])return false}
@@ -110,7 +146,7 @@ function qxRuleFix(f){
   if(CFG.mandRule!=='ai')f.mand=f.sev==='Priority';
   f.qxFix={...from,to:r.id,at:Date.now()};return true;
 }
-{const _fill=fillAI;fillAI=function(f,a,keep0){_fill(f,a,keep0);try{if(qxRuleFix(f)&&(!keep0||!f.ai0||f.ai0.rule===f.qxFix.rule))f.ai0={rule:f.rule,code:f.code,req:f.req,sev:f.sev,kind:f.kind}}catch(e){console.warn(e)}}}
+{const _fill=fillAI;fillAI=function(f,a,keep0){_fill(f,a,keep0);try{if(!qxLearnFix(f)&&qxRuleFix(f)&&(!keep0||!f.ai0||f.ai0.rule===f.qxFix.rule))f.ai0={rule:f.rule,code:f.code,req:f.req,sev:f.sev,kind:f.kind,title:f.title}}catch(e){console.warn(e)}}}
 
 /* ---------- 2. Liệt kê vật thể trước, lỗi phải gắn vật thể ---------- */
 const QX_OBJ=`
@@ -231,20 +267,22 @@ function qxUnify(g){const R=g.rep.f;for(const{p,f}of g.items){if(f===R)continue;
   for(const k of['rule','code','req','law','kind'])if(R[k]&&f[k]!==R[k]){f[k]=R[k];ch=true}
   if(f.sev!==g.sev){f.sev=g.sev;ch=true}if(CFG.mandRule!=='ai')f.mand=f.sev==='Priority';if(ch)Store.touch(p)}
   if(R.sev!==g.sev){R.sev=g.sev;Store.touch(g.rep.p)}}
-function qxConfirm(g){qxUnify(g);let n=0;for(const{p,f}of g.items)if(!f.ok&&done(f)){f.ok=true;learn(f,p);Store.touch(p);n++}toast(n?`Đã xác nhận ${n} lỗi trong nhóm, thống nhất mã ${g.rep.f.req||g.rep.f.code||''} mức ${g.sev}.`:'Cả nhóm đã được xác nhận.');qxRefresh()}
+function qxConfirm(g){qxUnify(g);let n=0;for(const{p,f}of g.items)if(!f.ok&&done(f)){f.ok=true;learn(f,p,f!==g.rep.f);Store.touch(p);n++}else if(f.ok&&done(f)){learn(f,p,true)}toast(n?`Đã xác nhận ${n} lỗi trong nhóm, thống nhất mã ${g.rep.f.req||g.rep.f.code||''} mức ${g.sev}.`:'Cả nhóm đã được xác nhận.');qxRefresh()}
 function qxUnconfirm(g){let n=0;for(const{p,f}of g.items)if(f.ok){f.ok=false;Store.touch(p);n++}if(n)toast(`Đã bỏ xác nhận ${n} vị trí trong nhóm.`);qxRefresh()}
 function qxSplit(p,f){f.nogrp=true;Store.touch(p);toast('Đã tách lỗi khỏi nhóm.');qxRefresh()}
 function qxSetRep(p,f){f.qxRep=Date.now();Store.touch(p);toast('Đã chọn ảnh này làm ảnh đại diện của nhóm.');qxRefresh()}
 function qxGo(p,f){S.listAll=false;S.cur=p.id;S.sel=f.id;if(typeof setDView==='function'&&!isMobile())setDView('review');renderAll();fit();if(isMobile())setView('review')}
 function qxPanel(){
   if(!QX.cfg.group)return null;const gs=qxGroups();if(!gs.length)return null;
-  const nf=gs.reduce((a,g)=>a+g.items.length,0),hotGs=gs.filter(g=>g.hot),hotPend=hotGs.reduce((a,g)=>a+g.pend,0);
-  return h('details',{class:'qxgrp'+(hotGs.length?' has-hot':''),open:true},
+  const nf=gs.reduce((a,g)=>a+g.items.length,0),hotGs=gs.filter(g=>g.hot),hotPend=hotGs.reduce((a,g)=>a+g.pend,0),totPend=gs.reduce((a,g)=>a+g.pend,0);
+  const isOpen=QX.panelOpen!=null?!!QX.panelOpen:(totPend>0&&gs.length<=3);
+  return h('details',{class:'qxgrp'+(hotGs.length?' has-hot':''),open:isOpen,ontoggle:e=>{QX.panelOpen=e.currentTarget.open}},
     h('summary',null,
-      h('b',null,`Lỗi lặp lại nhiều vị trí (${gs.length} nhóm · ${nf} lỗi)`),
-      hotGs.length?h('span',{class:'qx-sum-alert'},`⚠️ ${hotGs.length} nhóm vi phạm cao cần kiểm tra kỹ${hotPend?` (${hotPend} chờ xác nhận)`:''}`):null,
-      h('small',null,' · Xuất báo cáo gộp mỗi nhóm thành 1 dòng duy nhất')),
-    ...gs.map(g=>{const okN=g.items.length-g.pend,allOk=!g.pend,R=g.rep.f,firstTarget=(g.items.find(x=>!x.f.ok)||g.rep);
+      h('b',null,`Lỗi lặp lại nhiều vị trí (${gs.length} nhóm · ${nf} lỗi${totPend?` · ${totPend} chờ`:' · đã xác nhận đủ'})`),
+      hotGs.length?h('span',{class:'qx-sum-alert'},`⚠️ ${hotGs.length} nhóm vi phạm cao${hotPend?` (${hotPend} chờ xác nhận)`:''}`):null,
+      h('small',null,' · Gộp mỗi nhóm thành 1 dòng khi xuất file'),
+      h('button',{class:'qx-sum-jump',type:'button',onclick:e=>{e.preventDefault();e.stopPropagation();const d=$('tDetailHd')||document.querySelector('#list .tdetail-hd');if(d)d.scrollIntoView({behavior:'smooth',block:'start'})}},'Xem danh sách chi tiết ↓')),
+    h('div',{class:'qxgrp-body'},...gs.map(g=>{const okN=g.items.length-g.pend,allOk=!g.pend,R=g.rep.f,firstTarget=(g.items.find(x=>!x.f.ok)||g.rep);
       return h('div',{class:'qxg1'+(g.hot?' qx-'+g.hot:'')+(allOk&&!g.hot?' is-done':'')},
         g.hot?h('div',{class:'qxg-rib '+g.hot},
           h('b',null,g.hot==='crit'?`🔥 VI PHẠM CAO LẶP LẠI LIÊN TỤC (${g.sev} · ${g.items.length} vị trí) — KIỂM TRA KỸ`:`⚠️ LỖI NẶNG LẶP LẠI (${g.sev} · ${g.items.length} vị trí) — KIỂM TRA KỸ`),
@@ -267,7 +305,7 @@ function qxPanel(){
             ?[h('span',{class:'st-pill ok'},'✓ Đã xác nhận nhóm'),
               h('button',{class:'btn sm btn-unok',title:'Hoàn tác xác nhận cả nhóm về trạng thái Chờ xác nhận',onclick:()=>qxUnconfirm(g)},'↺ Bỏ xác nhận')]
             :[h('button',{class:'btn sm btn-cfm',onclick:()=>qxConfirm(g)},okN?`Xác nhận nốt ${g.pend} vị trí`:`Xác nhận cả nhóm (${g.items.length})`)]),
-          h('button',{class:'btn sm',onclick:()=>{qxUnify(g);toast(`Đã thống nhất mã ${R.req||R.code||''}, mức ${g.sev} cho cả nhóm.`);qxRefresh()}},'Thống nhất mã')))}));
+          h('button',{class:'btn sm',onclick:()=>{qxUnify(g);toast(`Đã thống nhất mã ${R.req||R.code||''}, mức ${g.sev} cho cả nhóm.`);qxRefresh()}},'Thống nhất mã')))})));
 }
 {const _tf=tFilter;tFilter=function(st){const r=_tf(st);if(!QX_HOT_ONLY||!QX.cfg.group)return r;const m=qxMap();return r.filter(x=>{const g=m.get(x.f.id);return!!(g&&g.hot)})}}
 {const _rt=renderTable;renderTable=function(){_rt();try{if(iTyping())return;
@@ -276,11 +314,12 @@ function qxPanel(){
   let hb=$('tHotBtn');const tool=document.querySelector('#tbl .ttool');
   if(tool){if(!hb){hb=h('button',{id:'tHotBtn',class:'btn sm qx-flt',type:'button',onclick:()=>{QX_HOT_ONLY=!QX_HOT_ONLY;renderTable()}});tool.append(hb)}
     hb.hidden=!hotN;hb.classList.toggle('on',QX_HOT_ONLY);hb.textContent=`⚠️ Cao lặp lại (${hotN})`}
+  if(QX_HOT_ONLY){const af=$('tActiveFlt');if(af){af.hidden=false;const chip=h('button',{class:'tflt-chip',type:'button',onclick:()=>{QX_HOT_ONLY=false;renderTable()}},'⚠️ Chỉ lỗi cao lặp lại ×');af.prepend(chip)}}
   document.querySelectorAll('#tBody tr[data-fid]').forEach(tr=>{const g=m.get(tr.dataset.fid);if(g&&g.hot)tr.classList.add('qx-'+g.hot)});
   let box=$('qxGrp');if(!box){box=h('div',{id:'qxGrp'});$('tSel').before(box)}const pn=qxPanel();box.replaceChildren(...(pn?[pn]:[]))}catch(e){console.warn(e)}}}
 {const _ral=renderAllList;renderAllList=function(){_ral();try{if(iTyping())return;
   const m=qxMap();document.querySelectorAll('#list .arow2[data-fid]').forEach(el=>{const g=m.get(el.dataset.fid);if(g&&g.hot)el.classList.add('qx-'+g.hot)});
-  const pn=qxPanel();if(!pn)return;const L=$('list'),t=L.querySelector('.atool');t?t.after(pn):L.prepend(pn)}catch(e){console.warn(e)}}}
+  const pn=qxPanel();if(!pn)return;const L=$('list'),hd=L.querySelector('.tdetail-hd'),t=L.querySelector('.atool');hd?hd.before(pn):t?t.after(pn):L.prepend(pn)}catch(e){console.warn(e)}}}
 {const _rl0=renderList;renderList=function(){_rl0();try{if(S.listAll&&isMobile())return;const p=cur();if(!p||p.sample||!QX.cfg.group)return;
   const m=qxMap(),L=$('list'),hots=[];
   p.findings.forEach((f,i)=>{const g=m.get(f.id);if(!g||!g.hot)return;hots.push({f,i,g});
@@ -320,10 +359,11 @@ function qxPanel(){
           h('button',{class:'btn sm',type:'button',onclick:()=>qxGo(t0.p,t0.f)},'Kiểm tra ảnh ›'),
           typeof gxEdit==='function'?h('button',{class:'btn sm',type:'button',onclick:()=>gxEdit(g)},'Đối chiếu nhóm'):null))}))))}catch(e){console.warn(e)}}}
 {const _dt=dupTag;dupTag=function(p,f){const a=_dt(p,f),g=qxGroupOf(f);
-  const fx=f&&f.qxFix?h('span',{class:'tag qxfx',title:`AI chọn ${[f.qxFix.rule||'KHAC',f.qxFix.req||f.qxFix.code,f.qxFix.sev].filter(Boolean).join(' / ')}; app sửa theo bảng quy tắc thành ${f.rule} (${f.req||f.code}, ${f.sev})`},'Đã chỉnh mã'):null;
+  const lrn=f&&f.qxLearn?h('span',{class:'tag learned',title:`Đã tự động áp dụng bài học từ Sổ kinh nghiệm (AI gán ${[f.qxLearn.from&&f.qxLearn.from.rule,f.qxLearn.from&&f.qxLearn.from.code,f.qxLearn.from&&f.qxLearn.from.sev].filter(Boolean).join('/')} → chuẩn hóa thành ${[f.rule,f.req||f.code,f.sev].filter(Boolean).join('/')})`},'🧠 Đã áp dụng bài học'):f&&f.userEdited&&f.ok?h('span',{class:'tag learned',title:'Nội dung/mã lỗi do người đánh giá chỉnh sửa đã được lưu vào Sổ kinh nghiệm'},'🧠 Đã ghi nhớ'):null;
+  const fx=!lrn&&f&&f.qxFix?h('span',{class:'tag qxfx',title:`AI chọn ${[f.qxFix.rule||'KHAC',f.qxFix.req||f.qxFix.code,f.qxFix.sev].filter(Boolean).join(' / ')}; app sửa theo bảng quy tắc thành ${f.rule} (${f.req||f.code}, ${f.sev})`},'Đã chỉnh mã'):null;
   const gt=g?(g.hot?h('button',{class:'tag qxg qx-hot-tag '+g.hot,type:'button',title:'Bấm để đối chiếu cả nhóm tại các khu vực: '+qxAreas(g.items).join('; '),onclick:e=>{e.stopPropagation();if(typeof gxEdit==='function')gxEdit(g)}},`⚠️ Lặp ${g.items.length} vị trí · Kiểm tra kỹ`):
     h('span',{class:'tag qxg',title:'Khu vực: '+qxAreas(g.items).join('; ')},`Lặp lại · ${g.items.length} vị trí`)):null;
-  if(!fx&&!gt)return a;return h('span',{class:'qxtags'},a,gt,fx)}}
+  if(!lrn&&!fx&&!gt)return a;return h('span',{class:'qxtags'},a,gt,lrn,fx)}}
 
 /* Xuất file: mọi file xuất dùng chung cách gom nhóm — xem ai-group.js (v1.6.2) */
 

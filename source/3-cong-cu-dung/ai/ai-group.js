@@ -282,7 +282,7 @@ function gxEdit(g){
     for(const x of its){if(!touched.has(x.p)){hist(x.p);touched.add(x.p)}const f=x.f;
       if(r)Object.assign(f,{rule:r.id,code:r.c,req:r.q,law:lawStr(r.l),kind:r.kd==='hazard'?'hazard':'violation',cause:r.z});
       Object.assign(f,{title:T,ev:tE.value.trim(),sev:sV.value,fixNow:tN.value.trim(),fixRoot:tX.value.trim()});
-      if(CFG.mandRule!=='ai')f.mand=f.sev==='Priority';if(ok&&!f.ok){f.ok=true;learn(f,x.p)}}
+      if(CFG.mandRule!=='ai')f.mand=f.sev==='Priority';if(ok){f.ok=true;learn(f,x.p,x!==g.rep)}}
     let nNew=0;
     if(!merge){
       for(const it of extra)for(const x of(it.ph||its)){gxNewF(x.p,x.f.s,it,ok);nNew++}
