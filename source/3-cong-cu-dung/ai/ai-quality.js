@@ -98,6 +98,7 @@ function qxScore(id,t){const gs=QX_RX[id];if(!gs)return{all:false,obj:false,s:0}
 function qxGuess(text){const t=' '+qn(text)+' ';let best=null;
   for(const id of Object.keys(QX_RX)){if(!RULES[id])continue;const r=qxScore(id,t);if(r.all&&(!best||r.s>best.s))best={id,s:r.s}}
   return best}
+window.qxGuess=qxGuess;
 /* Tự động áp dụng bài học từ Sổ kinh nghiệm người đánh giá cho lỗi tương tự về sau */
 function qxLearnFix(f){
   if(!f||f.src!=='ai'||!Learn||!Array.isArray(Learn.items)||!Learn.items.length)return false;
@@ -136,7 +137,7 @@ function qxLearnFix(f){
 /* Quyết định có sửa id AI chọn hay không: chỉ sửa khi AI để KHAC/không có id, hoặc vật thể của id AI chọn không có trong nội dung lỗi */
 function qxRuleFix(f){
   if(f&&f.qxLearn)return false;
-  if(!QX.cfg.rules||!f||f.src!=='ai')return false;
+  if(!QX.cfg.rules||!f||(f.src!=='ai'&&f.code))return false;
   const text=`${f.title||''}. ${f.ev||''}`,b=qxGuess(text);if(!b||b.id===f.rule)return false;
   if(f.rule){const cur=qxScore(f.rule,' '+qn(text)+' ');if(cur.obj||!QX_RX[f.rule])return false}
   const r=RULES[b.id],from={rule:f.rule,code:f.code,req:f.req,sev:f.sev};
@@ -275,7 +276,7 @@ function qxGo(p,f){S.listAll=false;S.cur=p.id;S.sel=f.id;if(typeof setDView==='f
 function qxPanel(){
   if(!QX.cfg.group)return null;const gs=qxGroups();if(!gs.length)return null;
   const nf=gs.reduce((a,g)=>a+g.items.length,0),hotGs=gs.filter(g=>g.hot),hotPend=hotGs.reduce((a,g)=>a+g.pend,0),totPend=gs.reduce((a,g)=>a+g.pend,0);
-  const isOpen=QX.panelOpen!=null?!!QX.panelOpen:(totPend>0&&gs.length<=3);
+  const isOpen=!!QX.panelOpen;
   return h('details',{class:'qxgrp'+(hotGs.length?' has-hot':''),open:isOpen,ontoggle:e=>{QX.panelOpen=e.currentTarget.open}},
     h('summary',null,
       h('b',null,`Lỗi lặp lại nhiều vị trí (${gs.length} nhóm · ${nf} lỗi${totPend?` · ${totPend} chờ`:' · đã xác nhận đủ'})`),

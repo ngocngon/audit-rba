@@ -22,22 +22,31 @@ ensureEnglish=async function(groups){
   busy(cur(),`Đang dịch nội dung sang ${CAPN[L]}…`);
   try{return await lxEnsure(L,texts,t=>busy(cur(),t))}catch(e){console.warn(e);return 0}finally{busy(null)}
 };
-/* Findings: một ảnh một dòng, nội dung song ngữ (ngôn ngữ chọn ở trên, tiếng Việt ở dưới), cột thời hạn để trống */
+/* Findings: một ảnh một dòng, nội dung song ngữ (ngôn ngữ chọn ở trên, tiếng Việt ở dưới), cột thời hạn để trống, tự động điền đủ Provision/Category/Audit ID/Sub Category */
 photoRow=function(r,no,g){
   const L=lxL(),tr=t=>L?lxT(L,t):'';
   const fs=g.items.map(x=>x.f),rank=f=>{const k=SEV.indexOf(f.sev);return k<0?9:k};
-  const main=(fs.filter(f=>f.code).sort((x,y)=>rank(x)-rank(y))[0]||{}).code||'',multi=fs.some(f=>f.code&&f.code!==main),num=g.items.length>1;
-  const[B,C,E]=RBA.tpl.map[main]||['','',''],D=main;
+  fs.forEach(f=>{if(typeof resolveRbaCode==='function')resolveRbaCode(f,g.p)});
+  const main=(fs.filter(f=>f.code).sort((x,y)=>rank(x)-rank(y))[0]||{}).code||(typeof resolveRbaCode==='function'?resolveRbaCode(fs[0],g.p):'')||'BH102';
+  const multi=fs.some(f=>f.code&&f.code!==main),num=g.items.length>1;
+  const[B,C,E]=typeof tplMetaFor==='function'?tplMetaFor(main):(RBA.tpl.map[main]||['B. Health and Safety','Health and Safety','Machine Safety']),D=main;
   const list=get=>g.items.map(({f,n})=>{const t=(get(f)||'').trim();return t?`${num?`${n}. `:''}${multi&&f.code?`(${f.code}) `:''}${t}`:''}).filter(Boolean).join('\n');
   const pair=(x,vi)=>x?`${x}\n\n${vi}`:vi;
   const a=String(g.p.area||'').trim(),aX=tr(a),area=a?(aX?`${aX}\n${a}`:a):(L?`${LX_SITE[L]}\nHiện trường`:'Hiện trường');
   const G=pair(L?list(f=>tr(f.title)):'',list(f=>f.title)),M=CFG.fixes?pair(L?list(f=>tr(planVi(f))):'',list(planVi)):'';
   const cause=fs.some(f=>(f.cause||'Administrative')==='Facility')?'Facility':'Administrative',mand=fs.some(f=>f.mand);
   const cs=C.includes('\n')?31:C==='Environment'?4:9;
-  const pt=Math.min(409,Math.max(CELL_HPT,6+16*Math.max(lineCount(G,70),lineCount(M,35),lineCount(area,15),lineCount(E,32),lineCount(B,35),lineCount(D,8))));
+  const pt=Math.min(409,Math.max(CELL_HPT+12,8+16*Math.max(lineCount(G,70),lineCount(M,35),lineCount(area,15),lineCount(E,32),lineCount(B,35),lineCount(D,8))));
   const xml=`<row r="${r}" spans="1:19" ht="${pt.toFixed(1)}" customHeight="1"><c r="A${r}" s="4"><v>${no}</v></c>${xText('B'+r,31,B)}${xText('C'+r,cs,C)}${xText('D'+r,31,D)}${xText('E'+r,7,E)}${xText('F'+r,31,area)}${xText('G'+r,32,G)}${xText('H'+r,78,cause)}${xText('I'+r,48,mand?'mandatory':'')}<c r="J${r}" s="4"/><c r="K${r}" s="4"/><c r="L${r}" s="1"/>${xText('M'+r,2,M)}<c r="N${r}" s="4"/><c r="O${r}" s="1"/><c r="P${r}" s="1"/><c r="Q${r}" s="1"/><c r="R${r}" s="1"/><c r="S${r}" s="1"/></row>`;
   return{pt,xml};
 };
+/* Word (.docx): dịch đầy đủ tiêu đề nhóm gộp và hành động khắc phục theo ngôn ngữ đã chọn */
+if(typeof exportDocx==='function'){const _d=exportDocx;exportDocx=async function(...a){
+  const L=lxL();if(L&&exportReady().ready){try{await qxPrep()}catch(e){console.warn(e)}
+    const gs=gather();if(gs.length){busy(cur(),`Đang dịch nội dung sang ${CAPN[L]}…`);
+      try{await lxEnsure(L,gs.flatMap(g=>[g.p.area,...g.items.flatMap(({f})=>[f.title,CFG.fixes?planVi(f):''])]),t=>busy(cur(),t))}catch(e){console.warn(e)}finally{busy(null)}}}
+  return _d.apply(this,a);
+}}
 /* File đối chiếu Guider: phát hiện và hành động khắc phục ghi song ngữ "tiếng Việt / bản dịch" */
 {const _r=exportReview;exportReview=async function(...a){
   const L=lxL();if(!L||!exportReady().ready)return _r.apply(this,a);

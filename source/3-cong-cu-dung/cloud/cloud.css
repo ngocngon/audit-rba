@@ -32,10 +32,8 @@ html.clgate body{overflow:hidden}
   .clstats,.cl-kpis{grid-template-columns:repeat(2,1fr)!important}
   .cl-prev-grid{grid-template-columns:1fr!important}
 }
-.dnav>button[data-dv="cloud"],.tabbar button[data-v="cloud"],#cloudPage{--ac:#0369A1;--acs:#E0F2FE}
-.dnav>button[data-dv="admin"],#adminPage{--ac:#B91C1C;--acs:#FEE2E2}
-:root[data-theme="dark"] .dnav>button[data-dv="cloud"],:root[data-theme="dark"] .tabbar button[data-v="cloud"],:root[data-theme="dark"] #cloudPage{--ac:#7DD3FC;--acs:#0C3550}
-:root[data-theme="dark"] .dnav>button[data-dv="admin"],:root[data-theme="dark"] #adminPage{--ac:#FCA5A5;--acs:#4A1717}
+.dnav>button[data-dv="cloud"],.tabbar button[data-v="cloud"],#cloudPage{--ac:var(--accent);--acs:var(--accent-soft)}
+.dnav>button[data-dv="admin"],#adminPage{--ac:var(--accent);--acs:var(--accent-soft)}
 html:not([data-role="admin"]) .cl-admin{display:none!important}
 
 /* --- v1.6.9: Không gian Kho audit online thiết kế khoa học 3 tầng --- */
@@ -139,7 +137,7 @@ details.cl-more[open]>summary{border-color:var(--ac);color:var(--ac);background:
 
 .cl-know-list{display:grid;gap:8px}
 .cl-know-card{border:1px solid var(--line);border-left:4px solid var(--ac);border-radius:10px;padding:10px 13px;background:var(--panel);display:grid;gap:4px}
-.cl-know-card.fix{border-left-color:#7c3aed}
+.cl-know-card.fix{border-left-color:var(--accent)}
 .cl-know-card.miss{border-left-color:var(--maj)}
 .cl-know-card.reject{border-left-color:var(--pri)}
 .clstats{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:12px}

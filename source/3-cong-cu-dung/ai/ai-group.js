@@ -129,7 +129,7 @@ function sxPanel(p){
 
 /* ---------- 1. Một nhóm = một lỗi duy nhất trong mọi file xuất ---------- */
 const GX_FULL={t:'rect',x:.004,y:.004,w:.992,h:.992};
-const GX_COL={Priority:'#D32F2F',Major:'#EF6C00',Minor:'#F9A825'};
+const GX_COL={Priority:'#BE123C',Major:'#C2410C',Minor:'#A16207'};
 const QXC=new Map();
 function gxMode(g){const x=g.items.find(x=>x.f.qxMode);return x?x.f.qxMode:(QX.cfg.groupImg||'collage')}
 function gxSetMode(g,m){for(const x of g.items){x.f.qxMode=m;Store.touch(x.p)}toast(m==='collage'?'Nhóm này xuất bằng ảnh ghép các vị trí.':'Nhóm này xuất bằng ảnh đại diện.');qxRefresh()}
@@ -188,6 +188,7 @@ const gxPre=async()=>{try{await qxPrep()}catch(e){console.warn(e)}};
 {const _f=exportFindings;exportFindings=async function(...a){await gxPre();return _f.apply(this,a)}}
 {const _f=previewImage;previewImage=async function(...a){await gxPre();return _f.apply(this,a)}}
 {const _f=exportPdf;exportPdf=async function(...a){await gxPre();return _f.apply(this,a)}}
+{if(typeof exportDocx==='function'){const _f=exportDocx;exportDocx=async function(...a){await gxPre();return _f.apply(this,a)}}}
 {const _f=exportReview;exportReview=async function(...a){await gxPre();return _f.apply(this,a)}}
 /* File nén ảnh báo cáo: cùng danh sách với ảnh báo cáo và PDF */
 exportZip=async function(skip){
