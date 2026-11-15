@@ -1258,11 +1258,15 @@ function placeBadges(rs,px,map,r,bounds){
   return res;
 }
 function drawMarks(g,items,map,o){
+  if(!items||!items.length)return;
   const rs=regionsOf(items),px=rs.map(r=>{const[a,b]=map(r.b.x,r.b.y),[c,d]=map(r.b.x+r.b.w,r.b.y+r.b.h);return{a,b,c,d}}),lit=r=>!o.sel||r.items.some(x=>x.f.id===o.sel);
-  for(const r of rs){const it=r.items.find(x=>x.f.id===o.sel)||r.items[0],mine=it.f.id===o.sel;g.globalAlpha=lit(r)?1:.28;
-    paint(g,r.items.length>1&&!mine?{t:'rect',...r.b}:it.f.s,r.c[0],map,{lw:mine?o.lw*1.35:o.lw,dash:o.dash&&it.f.src==='ai'&&!it.f.ok,fill:mine})}
-  const pos=placeBadges(rs,px,map,o.r,o.bounds);
-  rs.forEach((r,i)=>{g.globalAlpha=lit(r)?1:.28;r.items.forEach((it,k)=>badge(g,it.n,it.f.sev,pos[i].x-pos[i].hw+k*2.6*o.r,pos[i].y,o.r,r.c))});
+  const clipMap=o.bounds?(u,v)=>{const[x,y]=map(u,v),p=o.lw*1.2;return[clamp(x,o.bounds[0]+p,o.bounds[2]-p),clamp(y,o.bounds[1]+p,o.bounds[3]-p)]}:map;
+  for(const r of rs){const it=r.items.find(x=>x.f.id===o.sel)||r.items[0],mine=it.f.id===o.sel,sh=r.items.length>1&&!mine?{t:'rect',...r.b}:it.f.s;g.globalAlpha=lit(r)?1:.28;
+    paint(g,sh,r.c[0],sh.t==='rect'?clipMap:map,{lw:mine?o.lw*1.35:o.lw,dash:o.dash&&it.f.src==='ai'&&!it.f.ok,fill:mine})}
+  if(items.length>1&&!o.noBadge){
+    const pos=placeBadges(rs,px,map,o.r,o.bounds);
+    rs.forEach((r,i)=>{g.globalAlpha=lit(r)?1:.28;r.items.forEach((it,k)=>badge(g,it.n,it.f.sev,pos[i].x-pos[i].hw+k*2.6*o.r,pos[i].y,o.r,r.c))});
+  }
   g.globalAlpha=1;
 }
 /* Gọn vùng: gộp lỗi cùng mã cùng chỗ, rồi cắt vùng lớn cho khỏi đè vùng nhỏ */
@@ -1771,7 +1775,7 @@ async function fonts(){try{await Promise.all([document.fonts.load(`400 26px ${fo
 function wrap(g,text,w){const out=[];for(const para of String(text).split('\n')){let line='';for(const word of para.split(/\s+/)){const t=line?line+' '+word:word;if(g.measureText(t).width>w&&line){out.push(line);line=word}else line=t}if(line)out.push(line)}return out}
 async function reportCanvas(p,L=capLang()){
   const im=await ensureImg(p);await fonts();
-  const FB=fontL(L),W=1800,pad=56,list=numbered(p),k=Math.min((W-2*pad)/p.w,1320/p.h),pw=p.w*k,ph=p.h*k,tw=W-2*pad-70;
+  const FB=fontL(L),W=1800,pad=56,list=numbered(p),single=list.length<=1,tOff=single?26:70,k=Math.min((W-2*pad)/p.w,1320/p.h),pw=p.w*k,ph=p.h*k,tw=W-2*pad-tOff;
   const m=mk(10,10).getContext('2d'),cols=colorsOf(list),FT=`600 30px ${FB}`,FX=`500 28px ${FB}`,FE=`400 25px ${FB}`;
   const blocks=list.map(({f,n})=>{m.font=FT;const tl=wrapX(m,f.title,tw),tr=L==='vi'?'':capOf(L,f.title);m.font=FX;const xl=tr?wrapX(m,tr,tw):[];
     m.font=FE;const ev=L==='vi'?(f.ev||'').trim():'',el=ev&&ev!==f.title.trim()?wrapX(m,ev,tw):[];
@@ -1783,13 +1787,14 @@ async function reportCanvas(p,L=capLang()){
   if(area)kvLine(g,[[capLab('area',L),areaX?`${area} · ${areaX}`:area]],pad,96,W-2*pad,26,FB);
   const px=(W-pw)/2,py=head;g.fillStyle='#1A2125';g.fillRect(pad,py,W-2*pad,ph);g.drawImage(im,px,py,pw,ph);
   const map=(u,v)=>[px+u*pw,py+v*ph];g.save();g.beginPath();g.rect(px,py,pw,ph);g.clip();
-  drawMarks(g,list,map,{lw:Math.max(3.5,pw/440),r:clamp(pw/56,16,24)});g.restore();
+  if(!p.qxg)drawMarks(g,list,map,{lw:Math.max(3.5,pw/440),r:clamp(pw/56,16,24),bounds:[px,py,px+pw,py+ph]});g.restore();
   let y=py+ph+34;
   for(const b of blocks){
-    badge(g,b.n,b.f.sev,pad+24,y+18,20,cols[b.f.id]);
-    let ty=y+28;g.textAlign='left';g.textBaseline='alphabetic';g.fillStyle='#14191C';g.font=FT;b.tl.forEach(l=>{g.fillText(l,pad+70,ty);ty+=41});
-    if(b.xl.length){ty+=6;g.fillStyle='#1F4E8C';g.font=FX;b.xl.forEach(l=>{g.fillText(l,pad+70,ty);ty+=38})}
-    if(b.el.length){ty+=8;g.fillStyle='#3A464C';g.font=FE;b.el.forEach(l=>{g.fillText(l,pad+70,ty);ty+=35})}
+    if(single){g.fillStyle=cols[b.f.id][0];rrect(g,pad,y+2,10,Math.max(32,b.hh-30),5);g.fill()}
+    else badge(g,b.n,b.f.sev,pad+24,y+18,20,cols[b.f.id]);
+    let ty=y+28;g.textAlign='left';g.textBaseline='alphabetic';g.fillStyle='#14191C';g.font=FT;b.tl.forEach(l=>{g.fillText(l,pad+tOff,ty);ty+=41});
+    if(b.xl.length){ty+=6;g.fillStyle='#1F4E8C';g.font=FX;b.xl.forEach(l=>{g.fillText(l,pad+tOff,ty);ty+=38})}
+    if(b.el.length){ty+=8;g.fillStyle='#3A464C';g.font=FE;b.el.forEach(l=>{g.fillText(l,pad+tOff,ty);ty+=35})}
     y+=b.hh;g.strokeStyle='#D3DAD9';g.lineWidth=1.5;g.beginPath();g.moveTo(pad,y-14);g.lineTo(W-pad,y-14);g.stroke();
   }
   return c;
@@ -2075,15 +2080,16 @@ async function slideCanvas(p,items,idx,total,L){
   const top=190,bot=H-86,bh=bot-top,land=p.w>=p.h,maxW=land?1100:780,k=Math.min(maxW/p.w,bh/p.h),pw=p.w*k,ph=p.h*k,px=M,py=top+(bh-ph)/2;
   g.fillStyle='#1A2125';g.fillRect(px,py,pw,ph);g.drawImage(im,px,py,pw,ph);
   const map=(u,v)=>[px+u*pw,py+v*ph];g.save();g.beginPath();g.rect(px,py,pw,ph);g.clip();
-  drawMarks(g,nos,map,{lw:Math.max(3.5,pw/360),r:clamp(pw/46,18,28)});g.restore();
+  if(!p.qxg)drawMarks(g,nos,map,{lw:Math.max(3.5,pw/360),r:clamp(pw/46,18,28),bounds:[px,py,px+pw,py+ph]});g.restore();
   g.strokeStyle='#D3DAD9';g.lineWidth=2;g.strokeRect(px,py,pw,ph);
-  const x0=px+pw+56,tx=x0+66,tw=W-M-tx,cols=colorsOf(items),F=fitBlocks(g,items,L,FB,tw,bh);
+  const single=items.length<=1,x0=px+pw+56,tx=x0+(single?24:66),tw=W-M-tx,cols=colorsOf(items),F=fitBlocks(g,items,L,FB,tw,bh);
   g.save();g.beginPath();g.rect(x0-6,top-6,W-M-x0+12,bh+12);g.clip();
   let y=top+Math.max(0,(bh-F.tot)/2);
   F.bl.forEach((b,i)=>{
     g.textAlign='left';g.textBaseline='alphabetic';
     let ty=y;
-    badge(g,b.n,'',x0+26,ty+F.lh*.5,clamp(F.z*.6,14,23),cols[b.f.id]);
+    if(single){g.fillStyle=cols[b.f.id][0];rrect(g,x0,ty+4,8,Math.max(24,b.hh-8),4);g.fill()}
+    else badge(g,b.n,'',x0+26,ty+F.lh*.5,clamp(F.z*.6,14,23),cols[b.f.id]);
     g.textAlign='left';g.textBaseline='alphabetic';g.fillStyle='#14191C';g.font=`600 ${F.z}px ${FB}`;
     b.tl.forEach(l=>{g.fillText(l,tx,ty+F.lh*.78);ty+=F.lh});
     if(b.xl.length){ty+=8;g.fillStyle='#1F4E8C';g.font=`500 ${F.xs}px ${FB}`;b.xl.forEach(l=>{g.fillText(l,tx,ty+F.xlh*.78);ty+=F.xlh})}
@@ -2193,20 +2199,23 @@ const CELL_WPT=202,CELL_HPT=150;
 /* Ảnh cho ô: luôn lấp kín ô, lấy vùng lỗi làm tâm nhưng giữ đủ hiện trạng xung quanh */
 async function photoCell(p,items){
   const im=await ensureImg(p);
-  const S=4,W=Math.round(CELL_WPT*4/3*S),H=Math.round(CELL_HPT*4/3*S),A=W/H,bs=items.map(({f})=>bbox(f.s));
+  const S=4,W=Math.round(CELL_WPT*4/3*S),H=Math.round(CELL_HPT*4/3*S),A=W/H;
+  const c=mk(W,H),g=c.getContext('2d');
+  if(p&&p.qxg){g.drawImage(im,0,0,W,H);return toBlob(c,'image/jpeg',.88)}
+  const bs=items.map(({f})=>bbox(f.s));
   const ux0=Math.min(...bs.map(b=>b.x))*p.w,uy0=Math.min(...bs.map(b=>b.y))*p.h,ux1=Math.max(...bs.map(b=>b.x+b.w))*p.w,uy1=Math.max(...bs.map(b=>b.y+b.h))*p.h;
   const maxW=p.w/p.h>A?p.h*A:p.w,cw=Math.min(maxW,Math.max((ux1-ux0)*2.2,(uy1-uy0)*2.2*A,maxW*.55)),ch=cw/A;
   const cx=clamp((ux0+ux1)/2-cw/2,0,p.w-cw),cy=clamp((uy0+uy1)/2-ch/2,0,p.h-ch),k=W/cw;
-  const c=mk(W,H),g=c.getContext('2d');g.drawImage(im,cx,cy,cw,ch,0,0,W,H);
+  g.drawImage(im,cx,cy,cw,ch,0,0,W,H);
   await fonts();drawMarks(g,items,(u,v)=>[(u*p.w-cx)*k,(v*p.h-cy)*k],{lw:Math.max(3,W/180),r:W/24,bounds:[0,0,W,H]});
   return toBlob(c,'image/jpeg',.88);
 }
-/* Một ảnh một dòng: các lỗi đánh số trùng số trên ảnh */
+/* Một ảnh một dòng: chỉ đánh số khi ảnh có từ 2 lỗi trở lên */
 function photoRow(r,no,g,area){
   const fs=g.items.map(x=>x.f),rank=f=>{const k=SEV.indexOf(f.sev);return k<0?9:k};
-  const main=(fs.filter(f=>f.code).sort((x,y)=>rank(x)-rank(y))[0]||{}).code||'',multi=fs.some(f=>f.code&&f.code!==main);
+  const main=(fs.filter(f=>f.code).sort((x,y)=>rank(x)-rank(y))[0]||{}).code||'',multi=fs.some(f=>f.code&&f.code!==main),num=g.items.length>1;
   const[B,C,E]=RBA.tpl.map[main]||['','',''],D=main;
-  const list=get=>g.items.map(({f,n})=>{const t=(get(f)||'').trim();return t?`${n}. ${multi&&f.code?`(${f.code}) `:''}${t}`:''}).filter(Boolean).join('\n');
+  const list=get=>g.items.map(({f,n})=>{const t=(get(f)||'').trim();return t?`${num?`${n}. `:''}${multi&&f.code?`(${f.code}) `:''}${t}`:''}).filter(Boolean).join('\n');
   const pair=(en,vi)=>en?`${en}\n\n${vi}`:vi;
   const G=pair(list(f=>TR.get(f.title.trim())),list(f=>f.title)),M=CFG.fixes?pair(list(f=>TR.get(planVi(f))),list(planVi)):'';
   const cause=fs.some(f=>(f.cause||'Administrative')==='Facility')?'Facility':'Administrative',mand=fs.some(f=>f.mand),due=fs.map(dueOf).filter(Boolean).sort()[0]||'';

@@ -26,9 +26,9 @@ ensureEnglish=async function(groups){
 photoRow=function(r,no,g){
   const L=lxL(),tr=t=>L?lxT(L,t):'';
   const fs=g.items.map(x=>x.f),rank=f=>{const k=SEV.indexOf(f.sev);return k<0?9:k};
-  const main=(fs.filter(f=>f.code).sort((x,y)=>rank(x)-rank(y))[0]||{}).code||'',multi=fs.some(f=>f.code&&f.code!==main);
+  const main=(fs.filter(f=>f.code).sort((x,y)=>rank(x)-rank(y))[0]||{}).code||'',multi=fs.some(f=>f.code&&f.code!==main),num=g.items.length>1;
   const[B,C,E]=RBA.tpl.map[main]||['','',''],D=main;
-  const list=get=>g.items.map(({f,n})=>{const t=(get(f)||'').trim();return t?`${n}. ${multi&&f.code?`(${f.code}) `:''}${t}`:''}).filter(Boolean).join('\n');
+  const list=get=>g.items.map(({f,n})=>{const t=(get(f)||'').trim();return t?`${num?`${n}. `:''}${multi&&f.code?`(${f.code}) `:''}${t}`:''}).filter(Boolean).join('\n');
   const pair=(x,vi)=>x?`${x}\n\n${vi}`:vi;
   const a=String(g.p.area||'').trim(),aX=tr(a),area=a?(aX?`${aX}\n${a}`:a):(L?`${LX_SITE[L]}\nHiện trường`:'Hiện trường');
   const G=pair(L?list(f=>tr(f.title)):'',list(f=>f.title)),M=CFG.fixes?pair(L?list(f=>tr(planVi(f))):'',list(planVi)):'';
