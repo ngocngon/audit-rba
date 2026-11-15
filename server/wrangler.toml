@@ -11,7 +11,8 @@ binding = "DB"
 database_name = "audit-rba"
 database_id = "292f0891-089b-46b6-9982-f9ab0e39174a"
 
-# Lưu trữ ảnh trên Cloudflare R2 (tạo bucket một lần bằng: `npx wrangler r2 bucket create audit-rba-images`)
-[[r2_buckets]]
-binding = "IMG"
-bucket_name = "audit-rba-images"
+# Bật R2 (sau khi bấm Enable R2 một lần tại https://dash.cloudflare.com/76a800a340d37b93e664c00da8e71a37/r2/overview):
+# bỏ dấu # ở 3 dòng dưới, chạy `npx wrangler r2 bucket create audit-rba-images && npx wrangler deploy`
+# [[r2_buckets]]
+# binding = "IMG"
+# bucket_name = "audit-rba-images"
