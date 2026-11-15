@@ -252,10 +252,10 @@ const MODEVN={quick:'Nhanh',default:'Chuẩn',complex:'Kỹ'};
 const apiCall=async(i,o={})=>{const t0=Date.now(),kind=AIKIND(typeof i==='string'?i:'');
   try{const r=await geminiCall(i,o);aiLog({kind,mode:MODEVN[o.modelTier]||'',model:o._model||'',ms:Date.now()-t0,ok:true});return r}
   catch(e){if(!(e&&e.code==='cancelled'))aiLog({kind,mode:MODEVN[o.modelTier]||'',model:o._model||'',ms:Date.now()-t0,ok:false,code:e&&e.code||'',msg:String(e&&e.message||'').slice(0,180)});throw e}};
-const API_SAMPLE=Object.assign((i,o)=>apiCall(i,o),{json:async(i,o={})=>{const g=KEY.prov()==='gemini',d=parseAIJSON((await apiCall(i,{...o,json:true})).text);return g?fixBoxes(d):d},limits:async()=>({images:{maxCount:2}})});
+const API_SAMPLE=Object.assign((i,o)=>apiCall(i,o),{json:async(i,o={})=>{const g=KEY.prov()==='gemini',d=parseAIJSON((await apiCall(i,{...o,json:true})).text);return g?fixBoxes(d):d},limits:async()=>({images:{maxCount:4}})});
 const NOKEY='Chưa có key Gemini nên AI chưa chạy. Bấm Cài đặt AI để lấy key miễn phí bằng tài khoản Google. Bạn vẫn khoanh vùng, chọn lỗi từ danh mục và xuất file được.';
 async function apiReady(){
-  await null;AI.sample=API_SAMPLE;AI.max=2;AI.par=2;LS.set('soat-ehs-key','');LS.set('soat-ehs-ai','');
+  await null;AI.sample=API_SAMPLE;AI.max=4;AI.par=2;LS.set('soat-ehs-key','');LS.set('soat-ehs-ai','');
   if(KEY.get()){AI.ok=true;AI.state='ready';AI.why='';uiState()}else aiOff(NOKEY);
   return null
 }

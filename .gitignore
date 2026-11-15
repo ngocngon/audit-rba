@@ -1,0 +1,7 @@
+.DS_Store
+__pycache__/
+*.pyc
+source/out/
+server/node_modules/
+server/.wrangler/
+server/.dev.vars

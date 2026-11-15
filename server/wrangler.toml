@@ -11,8 +11,7 @@ binding = "DB"
 database_name = "audit-rba"
 database_id = "292f0891-089b-46b6-9982-f9ab0e39174a"
 
-# Bật R2 (tùy chọn): bỏ dấu # ba dòng dưới, tạo bucket bằng `npx wrangler r2 bucket create audit-rba-images`.
-# Không có R2 thì ảnh được lưu trong D1.
-# [[r2_buckets]]
-# binding = "IMG"
-# bucket_name = "audit-rba-images"
+# Lưu trữ ảnh trên Cloudflare R2 (tạo bucket một lần bằng: `npx wrangler r2 bucket create audit-rba-images`)
+[[r2_buckets]]
+binding = "IMG"
+bucket_name = "audit-rba-images"

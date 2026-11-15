@@ -70,20 +70,27 @@ App soát ảnh hiện trường EHS theo RBA Guider 8.0.1: AI khoanh vùng và 
 - Lỗi 403 hiện đúng nguyên nhân Google báo và cách sửa: key bị lộ, giới hạn trang web, giới hạn API, chưa bật Generative Language API, vị trí mạng (VPN), thanh toán.
 - Nếu chỉ một mô hình bị chặn, app tự thử mô hình Gemini khác và nhớ mô hình dùng được.
 
+## Tối ưu lưu trữ R2, tìm kiếm & bảo mật (v1.6.5)
+
+- **Cloudflare R2 + tự động chuyển ảnh cũ:** bật lưu trữ ảnh hiện trường trên R2 (`audit-rba-images`, gỡ bỏ giới hạn 500 MB của D1), tự động đọc và di chuyển ngầm ảnh cũ từ bảng `imgs` (D1) sang R2 mà không làm gián đoạn người dùng; tự dọn sạch ảnh khi xóa audit.
+- **Tách `thumb` và chỉ mục `search_text` trên D1:** loại bỏ chuỗi Base64 ra khỏi dữ liệu JSON chính giúp `/api/search` không khớp nhầm ký tự Base64 và giảm ~90% băng thông đọc dòng ở `/api/ai/examples`.
+- **Bảo mật phiên & đăng nhập:** khóa dò mật khẩu tách biệt theo `(email, IP)` để chống khóa cứng tài khoản quản trị viên; cưỡng chế đổi mật khẩu tạm (`must_change`) ngay ở tầng API máy chủ và khi tải lại trang.
+- **AI Gemini (`ai/ai-key.js`, `ai/ai-group.js`):** ghi đúng tên mô hình dự phòng vào nhật ký và thống kê độ chính xác AI; không ghi đè mô hình chính khi chỉ mô hình chế độ Kỹ bị giới hạn; nâng giới hạn ảnh gửi "AI soát lại nhóm" lên đủ 4 vị trí.
+- **Đóng gói 1 lệnh (`build.py`):** tự động dựng PWA, kiểm tra cú pháp toàn bộ mã JS bằng `node --check` trước khi xuất ra `docs/`.
+
 ## Phát hành bản mới
 
 ```bash
-cd source
-mkdir -p out
-python3 3-cong-cu-dung/patch_pwa.py 1-ma-nguon-app/soat-anh-ehs-rba.html out/index.html 1.6.4
-python3 3-cong-cu-dung/pwa_assets.py out 1.6.4 3-cong-cu-dung/logo.webp
-cp 3-cong-cu-dung/_headers out/
-python3 3-cong-cu-dung/patch_cloud.py out/index.html https://audit-rba-api.likiop00.workers.dev
-python3 3-cong-cu-dung/patch_ai.py out/index.html
-cd .. && rm -rf docs/* && cp -r source/out/. docs/ && touch docs/.nojekyll && rm -rf source/out
-git add -A && git commit -m "v1.6.4" && git push
+python3 build.py 1.6.5
+git add -A && git commit -m "v1.6.5" && git push
 ```
 
-Nếu sửa `server/`: `cd server && npx wrangler deploy` (nếu đổi bảng thì chạy thêm `npx wrangler d1 execute audit-rba --remote --file schema.sql`).
+Triển khai máy chủ `server/` (Cloudflare Workers + D1 + R2):
+```bash
+cd server
+npx wrangler r2 bucket create audit-rba-images   # chạy 1 lần đầu khi bật R2
+npx wrangler d1 execute audit-rba --remote --file schema.sql
+npx wrangler deploy
+```
 
 Nhớ tăng số phiên bản mỗi lần phát hành để điện thoại lấy bản mới.

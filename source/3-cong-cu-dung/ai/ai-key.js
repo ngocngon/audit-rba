@@ -48,8 +48,11 @@ function gkNote(e){
     const alts=gm.all.filter(n=>n!==model).sort((a,b)=>(/flash/.test(b)?1:0)-(/flash/.test(a)?1:0)).slice(0,3);
     for(const m of alts){
       LS.set('soat-ehs-gmodels',JSON.stringify({...gm,main:m,deep:m}));LS.set('soat-ehs-gmain','');
-      try{const r=await _c(input,{...o,_gkTry:1});
-        LS.set('soat-ehs-gmodels',JSON.stringify({...gm,main:m,deep:o.modelTier==='complex'?m:(gm.deep===model?m:gm.deep)}));
+      try{const sub={...o,_gkTry:1};const r=await _c(input,sub);
+        o._model=sub._model||m;
+        const nextGm=o.modelTier==='complex'?{...gm,deep:m}:{...gm,main:m,deep:gm.deep===model?m:gm.deep};
+        LS.set('soat-ehs-gmodels',JSON.stringify(nextGm));
+        if(o.modelTier==='complex')LS.set('soat-ehs-gmain',saveMain||'');
         GK.why=GK.raw='';if(typeof toast==='function')toast(`Mô hình ${model} bị chặn với key này, đã chuyển sang ${m}.`);return r}
       catch(e2){const c2=e2&&e2.code;if(c2==='no_access')gkNote(e2);if(!(c2==='no_access'||c2==='api_error'))break}
     }

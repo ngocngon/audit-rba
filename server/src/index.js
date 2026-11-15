@@ -5,18 +5,57 @@ const ROLES = ['admin', 'auditor', 'viewer'];
 const PBKDF2_ITER = 100000;
 const SESSION_DAYS_DEFAULT = 30;
 const MAX_IMG = 8 * 1024 * 1024, MAX_IMG_D1 = 1900000;
-// Ảnh lưu ở R2 nếu có binding IMG, nếu không thì lưu thẳng trong D1 (bảng imgs, tối đa ~1,9 MB/ảnh)
-const imgPut = (env, aid, pid, buf, ct) => env.IMG
-  ? env.IMG.put(`${aid}/${pid}.jpg`, buf, { httpMetadata: { contentType: ct } })
-  : env.DB.prepare('INSERT OR REPLACE INTO imgs(audit_id,id,ct,data) VALUES(?,?,?,?)').bind(aid, pid, ct, buf).run();
-async function imgGet(env, aid, pid) {
-  if (env.IMG) { const o = await env.IMG.get(`${aid}/${pid}.jpg`); return o && { body: o.body, ct: o.httpMetadata?.contentType }; }
-  const r = await env.DB.prepare('SELECT ct, data FROM imgs WHERE audit_id=? AND id=?').bind(aid, pid).first();
-  return r && { body: r.data instanceof ArrayBuffer ? r.data : new Uint8Array(r.data), ct: r.ct };
+// Ảnh lưu ở R2 nếu có binding IMG, có đọc/chuyển tự động từ bảng imgs (D1) cho ảnh cũ
+async function imgPut(env, aid, pid, buf, ct) {
+  if (env.IMG) {
+    await env.IMG.put(`${aid}/${pid}.jpg`, buf, { httpMetadata: { contentType: ct } });
+    await env.DB.prepare('DELETE FROM imgs WHERE audit_id=? AND id=?').bind(aid, pid).run().catch(() => {});
+    return;
+  }
+  await env.DB.prepare('INSERT OR REPLACE INTO imgs(audit_id,id,ct,data) VALUES(?,?,?,?)').bind(aid, pid, ct, buf).run();
 }
-const imgDel = (env, aid, pid) => env.IMG ? env.IMG.delete(`${aid}/${pid}.jpg`) : env.DB.prepare('DELETE FROM imgs WHERE audit_id=? AND id=?').bind(aid, pid).run();
+async function imgGet(env, aid, pid, ctx) {
+  if (env.IMG) {
+    const o = await env.IMG.get(`${aid}/${pid}.jpg`);
+    if (o) return { body: o.body, ct: o.httpMetadata?.contentType };
+  }
+  const r = await env.DB.prepare('SELECT ct, data FROM imgs WHERE audit_id=? AND id=?').bind(aid, pid).first();
+  if (!r) return null;
+  const bytes = r.data instanceof ArrayBuffer ? new Uint8Array(r.data) : new Uint8Array(r.data);
+  if (env.IMG) {
+    const mig = env.IMG.put(`${aid}/${pid}.jpg`, bytes, { httpMetadata: { contentType: r.ct || 'image/jpeg' } })
+      .then(() => env.DB.prepare('DELETE FROM imgs WHERE audit_id=? AND id=?').bind(aid, pid).run())
+      .catch(() => {});
+    if (ctx && ctx.waitUntil) ctx.waitUntil(mig); else await mig;
+  }
+  return { body: bytes, ct: r.ct };
+}
+const imgDel = (env, aid, pid) => Promise.all([
+  env.IMG ? env.IMG.delete(`${aid}/${pid}.jpg`).catch(() => {}) : Promise.resolve(),
+  env.DB.prepare('DELETE FROM imgs WHERE audit_id=? AND id=?').bind(aid, pid).run().catch(() => {}),
+]);
 const MAX_DATA = 900 * 1024;
 const KV_KEYS = { lessons: 'auditor', guider: 'admin', guiderfile: 'admin', sys: 'admin' };
+
+let schemaReady = null;
+function ensureSchema(env) {
+  if (!schemaReady) {
+    schemaReady = Promise.all([
+      env.DB.prepare("ALTER TABLE photos ADD COLUMN thumb TEXT NOT NULL DEFAULT ''").run().catch(() => {}),
+      env.DB.prepare("ALTER TABLE photos ADD COLUMN search_text TEXT NOT NULL DEFAULT ''").run().catch(() => {}),
+    ]);
+  }
+  return schemaReady;
+}
+function buildSearchText(d) {
+  const fs = Array.isArray(d && d.findings) ? d.findings : [];
+  const parts = [d && d.area, d && d.note];
+  for (const f of fs) {
+    if (!f) continue;
+    parts.push(f.code, f.req, f.sev, f.rule, f.title, f.ev, f.fixNow, f.fixRoot);
+  }
+  return parts.filter(Boolean).map(x => String(x).trim()).filter(Boolean).join(' \n ').slice(0, 20000);
+}
 
 /* ---------- tiện ích ---------- */
 const enc = new TextEncoder();
@@ -157,17 +196,27 @@ on('POST', '/api/login', async (req, env) => {
   const b = await body(req);
   const email = str(b.email, 200).toLowerCase(), pw = typeof b.password === 'string' ? b.password : '';
   if (!email || !pw) fail(400, 'Nhập email và mật khẩu.');
-  const lf = await one(env, 'SELECT * FROM login_fail WHERE email=?', email);
-  if (lf && lf.until > now()) fail(429, `Đăng nhập sai nhiều lần. Thử lại sau ${Math.ceil((lf.until - now()) / 60000)} phút.`);
+  const ip = str(req.headers.get('CF-Connecting-IP') || req.headers.get('X-Forwarded-For') || 'local', 100).split(',')[0].trim() || 'local';
+  const kUser = `${email}|${ip}`, kIp = `ip|${ip}`;
+  const [lf, lfIp] = await Promise.all([
+    one(env, 'SELECT * FROM login_fail WHERE email=?', kUser),
+    one(env, 'SELECT * FROM login_fail WHERE email=?', kIp),
+  ]);
+  const lockUntil = Math.max(lf ? lf.until : 0, lfIp ? lfIp.until : 0);
+  if (lockUntil > now()) fail(429, `Đăng nhập sai nhiều lần. Thử lại sau ${Math.ceil((lockUntil - now()) / 60000)} phút.`);
   const u = await one(env, 'SELECT * FROM users WHERE email=?', email);
   if (!u || !(await checkPw(pw, u.pw))) {
-    const n = (lf ? lf.n : 0) + 1;
-    await run(env, 'INSERT INTO login_fail(email,n,until) VALUES(?,?,?) ON CONFLICT(email) DO UPDATE SET n=excluded.n, until=excluded.until',
-      email, n >= 8 ? 0 : n, n >= 8 ? now() + 10 * 60000 : 0);
+    const nU = (lf ? lf.n : 0) + 1, nI = (lfIp ? lfIp.n : 0) + 1;
+    await Promise.all([
+      run(env, 'INSERT INTO login_fail(email,n,until) VALUES(?,?,?) ON CONFLICT(email) DO UPDATE SET n=excluded.n, until=excluded.until',
+        kUser, nU >= 8 ? 0 : nU, nU >= 8 ? now() + 10 * 60000 : 0),
+      run(env, 'INSERT INTO login_fail(email,n,until) VALUES(?,?,?) ON CONFLICT(email) DO UPDATE SET n=excluded.n, until=excluded.until',
+        kIp, nI >= 20 ? 0 : nI, nI >= 20 ? now() + 10 * 60000 : 0),
+    ]);
     fail(401, 'Email hoặc mật khẩu không đúng.');
   }
   if (!u.active) fail(403, 'Tài khoản đã bị khóa. Liên hệ quản trị viên.');
-  await run(env, 'DELETE FROM login_fail WHERE email=?', email);
+  await run(env, 'DELETE FROM login_fail WHERE email IN (?,?)', kUser, email);
   const sys = await sysSettings(env);
   const days = Math.max(1, Math.min(365, Number(sys.sessionDays) || SESSION_DAYS_DEFAULT));
   const token = rid(40);
@@ -375,12 +424,20 @@ on('PUT', '/api/audits/:id/members', async (req, env, u, p) => {
   return json({ audit: auditOut(await one(env, `${AUDIT_SELECT} WHERE a.id=?`, a.id), u) });
 }, true);
 
-on('DELETE', '/api/audits/:id', async (req, env, u, p) => {
+on('DELETE', '/api/audits/:id', async (req, env, u, p, ctx) => {
   const a = await auditOf(env, p.id);
   const sys = await sysSettings(env);
   if (!(u.role === 'admin' || (sys.auditorDelete && u.role === 'auditor' && a.owner_id === u.id && a.status !== 'locked')))
     fail(403, 'Chỉ quản trị viên được xóa audit.');
-  await run(env, 'UPDATE audits SET deleted=1, updated_at=? WHERE id=?', now(), a.id);
+  const t = now();
+  const pids = await all(env, 'SELECT id FROM photos WHERE audit_id=?', a.id);
+  await run(env, 'UPDATE audits SET deleted=1, updated_at=? WHERE id=?', t, a.id);
+  await run(env, 'UPDATE photos SET deleted=1, img_size=0, srv=? WHERE audit_id=?', t, a.id);
+  await run(env, 'DELETE FROM imgs WHERE audit_id=?', a.id).catch(() => {});
+  if (env.IMG && pids.length) {
+    const cleanR2 = Promise.all(pids.map(r => env.IMG.delete(`${a.id}/${r.id}.jpg`).catch(() => {})));
+    if (ctx && ctx.waitUntil) ctx.waitUntil(cleanR2); else await cleanR2;
+  }
   await logAct(env, u.id, 'audit.delete', a.id, a.vendor);
   return json({ ok: true });
 }, true);
@@ -389,10 +446,17 @@ on('DELETE', '/api/audits/:id', async (req, env, u, p) => {
 on('GET', '/api/audits/:id/photos', async (req, env, u, p) => {
   await auditOf(env, p.id);
   const since = Number(new URL(req.url).searchParams.get('since')) || 0;
-  const rows = await all(env, 'SELECT id, area, data, upd, srv, updated_by, img_size, deleted FROM photos WHERE audit_id=? AND srv>? ORDER BY srv', p.id, since);
+  const rows = await all(env, 'SELECT id, area, data, thumb, upd, srv, updated_by, img_size, deleted FROM photos WHERE audit_id=? AND srv>? ORDER BY srv', p.id, since);
   return json({
     now: now(),
-    photos: rows.map(r => ({ id: r.id, area: r.area, upd: r.upd, srv: r.srv, by: r.updated_by, has_img: r.img_size > 0, deleted: !!r.deleted, data: r.deleted ? null : JSON.parse(r.data || '{}') })),
+    photos: rows.map(r => {
+      let data = null;
+      if (!r.deleted) {
+        try { data = JSON.parse(r.data || '{}'); } catch { data = {}; }
+        if (r.thumb && !data.thumb) data.thumb = r.thumb;
+      }
+      return { id: r.id, area: r.area, upd: r.upd, srv: r.srv, by: r.updated_by, has_img: r.img_size > 0, deleted: !!r.deleted, data };
+    }),
   });
 }, true);
 
@@ -408,10 +472,13 @@ on('PUT', '/api/audits/:id/photos/:pid', async (req, env, u, p) => {
   const ex = await one(env, 'SELECT upd, deleted FROM photos WHERE audit_id=? AND id=?', a.id, p.pid);
   if (ex && ex.upd > upd && !ex.deleted) return json({ ok: false, stale: true, upd: ex.upd }, 409);
   const f = Array.isArray(d.findings) ? d.findings : [];
+  const thumb = typeof d.thumb === 'string' ? d.thumb.slice(0, 150000) : '';
+  const searchText = buildSearchText(d);
+  const slim = JSON.stringify({ ...d, thumb: '' });
   const t = now();
-  await run(env, `INSERT INTO photos(id,audit_id,area,data,n_f,n_ok,upd,srv,updated_by,deleted) VALUES(?,?,?,?,?,?,?,?,?,0)
-    ON CONFLICT(audit_id,id) DO UPDATE SET area=excluded.area, data=excluded.data, n_f=excluded.n_f, n_ok=excluded.n_ok, upd=excluded.upd, srv=excluded.srv, updated_by=excluded.updated_by, deleted=0`,
-    p.pid, a.id, str(d.area, 200), text, f.length, f.filter(x => x && x.ok).length, upd, t, u.id);
+  await run(env, `INSERT INTO photos(id,audit_id,area,data,thumb,search_text,n_f,n_ok,upd,srv,updated_by,deleted) VALUES(?,?,?,?,?,?,?,?,?,?,?,0)
+    ON CONFLICT(audit_id,id) DO UPDATE SET area=excluded.area, data=excluded.data, thumb=CASE WHEN excluded.thumb<>'' THEN excluded.thumb ELSE photos.thumb END, search_text=excluded.search_text, n_f=excluded.n_f, n_ok=excluded.n_ok, upd=excluded.upd, srv=excluded.srv, updated_by=excluded.updated_by, deleted=0`,
+    p.pid, a.id, str(d.area, 200), slim, thumb, searchText, f.length, f.filter(x => x && x.ok).length, upd, t, u.id);
   await run(env, 'UPDATE audits SET updated_at=? WHERE id=?', t, a.id);
   return json({ ok: true, srv: t });
 }, true);
@@ -430,10 +497,10 @@ on('PUT', '/api/audits/:id/photos/:pid/img', async (req, env, u, p) => {
   return json({ ok: true, size: buf.byteLength });
 }, true);
 
-on('GET', '/api/audits/:id/photos/:pid/img', async (req, env, u, p) => {
+on('GET', '/api/audits/:id/photos/:pid/img', async (req, env, u, p, ctx) => {
   await auditOf(env, p.id);
   if (!okId(p.pid)) fail(400, 'Mã ảnh không hợp lệ.');
-  const o = await imgGet(env, p.id, p.pid);
+  const o = await imgGet(env, p.id, p.pid, ctx);
   if (!o) fail(404, 'Chưa có ảnh trên hệ thống.');
   return new Response(o.body, { headers: { 'Content-Type': o.ct || 'image/jpeg', 'Cache-Control': 'private, max-age=86400' } });
 }, true);
@@ -442,9 +509,8 @@ on('DELETE', '/api/audits/:id/photos/:pid', async (req, env, u, p) => {
   const a = await auditOf(env, p.id);
   await mustEdit(env, u, a);
   const t = now();
-  await run(env, 'UPDATE photos SET deleted=1, srv=?, upd=?, updated_by=? WHERE audit_id=? AND id=?', t, t, u.id, a.id, p.pid);
+  await run(env, 'UPDATE photos SET deleted=1, thumb=?, search_text=?, img_size=0, srv=?, upd=?, updated_by=? WHERE audit_id=? AND id=?', '', '', t, t, u.id, a.id, p.pid);
   await imgDel(env, a.id, p.pid).catch(() => {});
-  await run(env, 'UPDATE photos SET img_size=0 WHERE audit_id=? AND id=?', a.id, p.pid);
   return json({ ok: true });
 }, true);
 
@@ -452,8 +518,9 @@ on('DELETE', '/api/audits/:id/photos/:pid', async (req, env, u, p) => {
 on('GET', '/api/search', async (req, env, u) => {
   const q = str(new URL(req.url).searchParams.get('q'), 100);
   if (q.length < 2) return json({ results: [] });
-  const rows = await all(env, `SELECT p.audit_id, p.id, p.area, p.data, a.vendor, a.date FROM photos p JOIN audits a ON a.id=p.audit_id
-    WHERE p.deleted=0 AND a.deleted=0 AND (p.data LIKE ? OR p.area LIKE ? OR a.vendor LIKE ?) ORDER BY a.date DESC LIMIT 200`, `%${q}%`, `%${q}%`, `%${q}%`);
+  const pat = `%${q}%`;
+  const rows = await all(env, `SELECT p.audit_id, p.id, p.area, p.data, p.thumb, a.vendor, a.date FROM photos p JOIN audits a ON a.id=p.audit_id
+    WHERE p.deleted=0 AND a.deleted=0 AND ((CASE WHEN p.search_text<>'' THEN p.search_text ELSE p.data END) LIKE ? OR p.area LIKE ? OR a.vendor LIKE ?) ORDER BY a.date DESC LIMIT 200`, pat, pat, pat);
   const ql = q.toLowerCase();
   const results = [];
   for (const r of rows) {
@@ -462,7 +529,7 @@ on('GET', '/api/search', async (req, env, u) => {
     const fs = (Array.isArray(d.findings) ? d.findings : []).filter(f => f && [f.title, f.ev, f.code, f.req, f.fixNow, f.fixRoot].some(x => String(x || '').toLowerCase().includes(ql)));
     const areaHit = String(r.area || '').toLowerCase().includes(ql) || String(r.vendor || '').toLowerCase().includes(ql);
     if (!fs.length && !areaHit) continue;
-    results.push({ audit_id: r.audit_id, photo_id: r.id, area: r.area, vendor: r.vendor, date: r.date, thumb: d.thumb || '',
+    results.push({ audit_id: r.audit_id, photo_id: r.id, area: r.area, vendor: r.vendor, date: r.date, thumb: r.thumb || d.thumb || '',
       findings: (fs.length ? fs : (d.findings || []).slice(0, 3)).slice(0, 5).map(f => ({ title: f.title, sev: f.sev, code: f.code, ok: !!f.ok })) });
   }
   return json({ results: results.slice(0, 100) });
@@ -477,13 +544,61 @@ on('GET', '/api/admin/log', async (req, env, u) => {
 
 on('GET', '/api/admin/stats', async (req, env, u) => {
   need(u, 'admin');
-  const [us, au, ph, ve] = await Promise.all([
+  const [us, au, ph, ve, im] = await Promise.all([
     one(env, 'SELECT COUNT(*) AS n, SUM(active) AS act FROM users'),
     one(env, 'SELECT COUNT(*) AS n FROM audits WHERE deleted=0'),
     one(env, 'SELECT COUNT(*) AS n, COALESCE(SUM(img_size),0) AS bytes, COALESCE(SUM(n_f),0) AS nf FROM photos WHERE deleted=0'),
     one(env, 'SELECT COUNT(DISTINCT vendor) AS n FROM audits WHERE deleted=0'),
+    one(env, 'SELECT COUNT(*) AS n FROM imgs').catch(() => ({ n: 0 })),
   ]);
-  return json({ users: us.n, active: us.act || 0, audits: au.n, vendors: ve.n, photos: ph.n, findings: ph.nf, bytes: ph.bytes });
+  return json({ users: us.n, active: us.act || 0, audits: au.n, vendors: ve.n, photos: ph.n, findings: ph.nf, bytes: ph.bytes, r2: !!env.IMG, d1_imgs: im ? im.n : 0 });
+}, true);
+
+on('POST', '/api/admin/migrate-storage', async (req, env, u) => {
+  need(u, 'admin');
+  let purged = 0, indexed = 0, migrated = 0;
+  // 1. Dọn ảnh mồ côi của các audit hoặc ảnh đã đánh dấu xóa
+  const orph = await all(env, `SELECT p.audit_id, p.id FROM photos p LEFT JOIN audits a ON a.id=p.audit_id
+    WHERE (p.deleted=1 OR a.deleted=1 OR a.id IS NULL) AND p.img_size>0 LIMIT 40`);
+  for (const r of orph) {
+    await imgDel(env, r.audit_id, r.id);
+    await run(env, 'UPDATE photos SET img_size=0, thumb=?, search_text=? WHERE audit_id=? AND id=?', '', '', r.audit_id, r.id);
+    purged++;
+  }
+  const orphD1 = await run(env, `DELETE FROM imgs WHERE EXISTS(SELECT 1 FROM audits a WHERE a.id=imgs.audit_id AND a.deleted=1)
+    OR EXISTS(SELECT 1 FROM photos p WHERE p.audit_id=imgs.audit_id AND p.id=imgs.id AND p.deleted=1)`).catch(() => null);
+  if (orphD1 && orphD1.meta && orphD1.meta.changes) purged += orphD1.meta.changes;
+
+  // 2. Tách thumb và tạo search_text cho các ảnh cũ còn gộp chung trong data
+  const legacy = await all(env, `SELECT audit_id, id, data, thumb, search_text FROM photos
+    WHERE deleted=0 AND (data LIKE '%"thumb":"data:%' OR (search_text='' AND (n_f>0 OR area<>''))) LIMIT 50`);
+  const stmts = [];
+  for (const r of legacy) {
+    let d = {};
+    try { d = JSON.parse(r.data || '{}'); } catch { continue; }
+    const th = r.thumb || (typeof d.thumb === 'string' ? d.thumb.slice(0, 150000) : '');
+    const st = buildSearchText(d) || str(d.area, 200) || ' ';
+    const slim = JSON.stringify({ ...d, thumb: '' });
+    stmts.push(env.DB.prepare('UPDATE photos SET data=?, thumb=?, search_text=? WHERE audit_id=? AND id=?').bind(slim, th, st, r.audit_id, r.id));
+    indexed++;
+  }
+  if (stmts.length) await env.DB.batch(stmts);
+
+  // 3. Nếu đã bật R2, chuyển dần các ảnh cũ từ bảng imgs (D1) sang R2
+  if (env.IMG) {
+    const d1Rows = await all(env, 'SELECT audit_id, id, ct, data FROM imgs LIMIT 15');
+    for (const r of d1Rows) {
+      const bytes = r.data instanceof ArrayBuffer ? new Uint8Array(r.data) : new Uint8Array(r.data);
+      await env.IMG.put(`${r.audit_id}/${r.id}.jpg`, bytes, { httpMetadata: { contentType: r.ct || 'image/jpeg' } });
+      await run(env, 'DELETE FROM imgs WHERE audit_id=? AND id=?', r.audit_id, r.id);
+      migrated++;
+    }
+  }
+  const remD1 = env.IMG ? await one(env, 'SELECT COUNT(*) AS n FROM imgs').catch(() => ({ n: 0 })) : { n: 0 };
+  const remLeg = await one(env, `SELECT COUNT(*) AS n FROM photos WHERE deleted=0 AND (data LIKE '%"thumb":"data:%' OR (search_text='' AND (n_f>0 OR area<>'')))`).catch(() => ({ n: 0 }));
+  const more = (remD1 && remD1.n > 0) || (remLeg && remLeg.n > 0) || orph.length >= 40;
+  if (purged || indexed || migrated) await logAct(env, u.id, 'storage.migrate', null, `chuẩn hóa ${indexed}, sang R2 ${migrated}, dọn ${purged}`);
+  return json({ ok: true, indexed_photos: indexed, migrated_imgs: migrated, purged_orphans: purged, more });
 }, true);
 
 on('POST', '/api/admin/sessions/revoke', async (req, env, u) => {
@@ -562,18 +677,22 @@ on('GET', '/api/admin/ai-stats', async (req, env, u) => {
 
 /* ---------- vào ---------- */
 export default {
-  async fetch(req, env) {
+  async fetch(req, env, ctx) {
     const h = cors(req, env);
     if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: h });
     const url = new URL(req.url);
     let res;
     try {
+      await ensureSchema(env);
       const r = routes.find(r => r.method === req.method && r.re.test(url.pathname));
       if (!r) fail(404, 'Không có đường dẫn này.');
       const params = url.pathname.match(r.re).groups || {};
       for (const k in params) params[k] = decodeURIComponent(params[k]);
       const u = r.authed ? await auth(req, env) : null;
-      res = await r.fn(req, env, u, params);
+      if (u && u.must_change && !['/api/me', '/api/me/password', '/api/logout'].includes(url.pathname)) {
+        fail(403, 'Bạn cần đổi mật khẩu tạm trước khi tiếp tục.');
+      }
+      res = await r.fn(req, env, u, params, ctx);
     } catch (e) {
       if (e instanceof HttpError) res = json({ error: e.message }, e.status);
       else { console.error(e); res = json({ error: 'Lỗi máy chủ. Hãy thử lại.' }, 500); }

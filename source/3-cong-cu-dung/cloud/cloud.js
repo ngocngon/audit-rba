@@ -41,7 +41,7 @@ async function clLogin(e){
     if(prev&&prev!==r.user.id&&CL.audit){CL.audit.can_edit=false}
     if(!$('mWho').value.trim()){$('mWho').value=r.user.name;metaSave();uiExtra()}
     toast(`Xin chào ${r.user.name}. Vai trò: ${ROLE_L[r.user.role]}.`);
-    await clBoot(true);if(r.user.must_change)clPwDialog(true);
+    await clBoot(true);
   }catch(er){m.textContent=er.message}finally{b.disabled=false}
 }
 function clLogout(expired){
@@ -57,12 +57,12 @@ async function clLogoutWipe(){
 }
 function clPwDialog(force){
   const d=$('dlgClPw');$('clPwOld').value='';$('clPwNew').value='';$('clPwNew2').value='';$('clPwMsg').textContent=force?'Đây là lần đăng nhập đầu hoặc mật khẩu vừa được đặt lại. Hãy đổi mật khẩu riêng của bạn.':'';
-  $('clPwCancel').hidden=!!force;d.dataset.force=force?'1':'';d.showModal();
+  $('clPwCancel').hidden=!!force;d.dataset.force=force?'1':'';if(!d.open)d.showModal();
 }
 async function clPwSave(e){
-  e.preventDefault();const o=$('clPwOld').value,n=$('clPwNew').value,n2=$('clPwNew2').value,m=$('clPwMsg');
+  e.preventDefault();const o=$('clPwOld').value,n=$('clPwNew').value,n2=$('clPwNew2').value,m=$('clPwMsg'),wasForce=!!$('dlgClPw').dataset.force;
   if(n.length<8)return m.textContent='Mật khẩu mới cần ít nhất 8 ký tự.';if(n!==n2)return m.textContent='Hai lần nhập mật khẩu mới không giống nhau.';
-  try{await api('POST','/api/me/password',{old:o,new:n});CL.auth.user.must_change=false;clLS('auth',CL.auth);$('dlgClPw').dataset.force='';$('dlgClPw').close();toast('Đã đổi mật khẩu.')}catch(er){m.textContent=er.message}
+  try{await api('POST','/api/me/password',{old:o,new:n});CL.auth.user.must_change=false;clLS('auth',CL.auth);$('dlgClPw').dataset.force='';$('dlgClPw').close();toast('Đã đổi mật khẩu.');if(wasForce)await clBoot()}catch(er){m.textContent=er.message}
 }
 
 /* ảnh lớn được nén lại trước khi lưu online (máy chủ nhận tối đa ~1,9 MB/ảnh) */
@@ -79,10 +79,10 @@ async function clBoot(fresh){
   clApply();if(!clOn())return;
   try{const r=await api('GET','/api/me');CL.auth.user=r.user;clLS('auth',CL.auth);CL.sys=r.sys||{};clLS('sys',CL.sys);clApplySys()}
   catch(e){if(e.net){CL.sys=clLS('sys')||{};clApplySys();clApply();return}if(e.status===401)return}
+  if(CL.auth.user&&CL.auth.user.must_change){clApply();clPwDialog(true);return}
   clUsers();
   if(CL.audit)try{const r=await api('GET','/api/audits/'+CL.audit.id);CL.audit=r.audit;clLS('audit',CL.audit)}catch(e){if(e.status===404||e.status===410){CL.audit=null;clLS('audit',null);CL.lastPull=0;clLS('pull',0)}}
   CL.booted=true;clApply();clLearnSync();clSync();
-  if(fresh&&CL.auth.user.must_change)return;
 }
 async function clUsers(){try{const r=await api('GET','/api/users');CL.users=r.users||[]}catch{}}
 function clApplySys(){
@@ -299,12 +299,12 @@ function clMembersDialog(a){
 }
 
 /* ---------- Quản trị: người dùng, phân quyền, cài đặt hệ thống, nhật ký ---------- */
-const ACT_L={login:'Đăng nhập',password:'Đổi mật khẩu',bootstrap:'Khởi tạo hệ thống','user.create':'Tạo người dùng','user.update':'Sửa người dùng','user.delete':'Xóa người dùng',settings:'Cài đặt hệ thống','audit.create':'Tạo audit','audit.delete':'Xóa audit','audit.lock':'Khóa audit','audit.unlock':'Mở khóa audit','audit.owner':'Đổi người tạo audit','audit.members':'Giao audit','sessions.revoke':'Đăng xuất mọi thiết bị'};
+const ACT_L={login:'Đăng nhập',password:'Đổi mật khẩu',bootstrap:'Khởi tạo hệ thống','user.create':'Tạo người dùng','user.update':'Sửa người dùng','user.delete':'Xóa người dùng',settings:'Cài đặt hệ thống','audit.create':'Tạo audit','audit.delete':'Xóa audit','audit.lock':'Khóa audit','audit.unlock':'Mở khóa audit','audit.owner':'Đổi người tạo audit','audit.members':'Giao audit','sessions.revoke':'Đăng xuất mọi thiết bị','storage.migrate':'Tối ưu lưu trữ'};
 async function renderAdmin(){
   const P=$('adminB');if(!P)return;const A=CL.adm;
   if(!clAdmin()){P.replaceChildren(h('div',{class:'dcard'},h('h3',null,'Không có quyền'),h('p',{class:'hint'},'Chỉ quản trị viên mở được trang này.')));return}
   const tabs=h('div',{class:'stabs',role:'tablist'},...[['users','Người dùng'],['perm','Phân quyền audit'],['sys','Cài đặt hệ thống'],['ai','Độ chính xác AI'],['log','Nhật ký']].map(([t,l])=>h('button',{role:'tab','aria-selected':String(A.tab===t),onclick:()=>{A.tab=t;renderAdmin()}},l)));
-  const st=A.stats;const cards=h('div',{class:'clstats'},...(st?[['Người dùng',`${st.active}/${st.users}`,'đang hoạt động'],['Đối tác',st.vendors,''],['Lần audit',st.audits,''],['Ảnh',st.photos,(st.bytes/1048576).toFixed(1)+' MB'],['Lỗi',st.findings,'']]:[['…','','']]).map(([a,b,c])=>h('div',{class:'dcard'},h('small',null,a),h('b',null,String(b)),c?h('small',null,c):null)));
+  const st=A.stats;const cards=h('div',{class:'clstats'},...(st?[['Người dùng',`${st.active}/${st.users}`,'đang hoạt động'],['Đối tác',st.vendors,''],['Lần audit',st.audits,''],['Ảnh',st.photos,(st.bytes/1048576).toFixed(1)+' MB'+(st.r2?' · R2':' · D1')],['Lỗi',st.findings,'']]:[['…','','']]).map(([a,b,c])=>h('div',{class:'dcard'},h('small',null,a),h('b',null,String(b)),c?h('small',null,c):null)));
   if(!st)api('GET','/api/admin/stats').then(r=>{A.stats=r;renderAdmin()}).catch(()=>{});
   let body;
   if(A.tab==='users')body=clAdmUsers();else if(A.tab==='perm')body=clAdmPerm();else if(A.tab==='sys')body=clAdmSys();else if(A.tab==='ai')body=typeof clAdmAI==='function'?clAdmAI():h('p',{class:'hint'},'Chưa có mô-đun AI.');else body=clAdmLog();
@@ -369,7 +369,17 @@ function clAdmSys(){
       h('p',{class:'stat'},cfg?`Mức theo danh mục: ${cfg.sevLock?'có':'không'} · Mandatory theo Priority: ${cfg.mandRule!=='ai'?'có':'không'} · Viết khắc phục: ${cfg.fixes?'có':'không'} · Độ chắc chắn tối thiểu ${cfg.minConf}% · Hạn: Priority ${cfg.due.Priority} ngày, Major ${cfg.due.Major}, Minor ${cfg.due.Minor}.`:'Chưa đặt. Các máy dùng tiêu chí riêng.'),
       h('button',{class:'btn',onclick:()=>{CL.sys={...CL.sys,cfg:{sevLock:CFG.sevLock,mandRule:CFG.mandRule,fixes:CFG.fixes,minConf:CFG.minConf,due:{...CFG.due}}};renderAdmin();toast('Đã lấy tiêu chí trên máy này. Bấm Lưu cài đặt để áp dụng cho cả hệ thống.')}},'Dùng tiêu chí đang đặt trên máy này'),
       h('p',{class:'hint'},'Sửa tiêu chí ở Cài đặt → Tiêu chí & thời hạn, rồi quay lại bấm nút trên.')),
+    h('div',{class:'dcard'},h('h3',null,'Lưu trữ & Tối ưu CSDL'),
+      h('p',{class:'stat'},CL.adm.stats?`Kho ảnh chính: ${CL.adm.stats.r2?'Cloudflare R2 (không giới hạn 500 MB)':'Cloudflare D1'}${CL.adm.stats.d1_imgs?` · Còn ${CL.adm.stats.d1_imgs} ảnh cũ trong D1 chờ chuyển sang R2`:''}.`:'Đang kiểm tra trạng thái lưu trữ…'),
+      h('button',{class:'btn',onclick:clMigrateStorage},'Tối ưu chỉ mục & Dọn ảnh thừa / Chuyển ảnh sang R2'),
+      h('p',{class:'hint'},'Tách ảnh thu nhỏ và chỉ mục tìm kiếm để tăng tốc tra cứu, dọn ảnh của các audit đã xóa và chuyển ảnh cũ từ D1 sang R2 (nếu bật R2).')),
     h('div',{class:'dcard'},h('h3',null,'Lưu'),h('button',{class:'btn primary wide',onclick:clSysSave},'Lưu cài đặt hệ thống'),h('p',{class:'hint'},'Các máy nhận cài đặt mới khi mở lại app hoặc đăng nhập lại.')));
+}
+async function clMigrateStorage(e){
+  const b=e&&e.currentTarget;if(b){b.disabled=true;b.textContent='Đang tối ưu lưu trữ…'}
+  try{let totI=0,totP=0,totO=0;for(let k=0;k<20;k++){const r=await api('POST','/api/admin/migrate-storage',{});totI+=r.migrated_imgs||0;totP+=r.indexed_photos||0;totO+=r.purged_orphans||0;if(!r.more)break}
+    CL.adm.stats=null;toast(`Đã tối ưu xong: chuẩn hóa ${totP} ảnh, chuyển ${totI} ảnh sang R2, dọn ${totO} ảnh thừa.`);renderAdmin()}
+  catch(er){toast(er.message)}finally{if(b){b.disabled=false;b.textContent='Tối ưu chỉ mục & Dọn ảnh thừa / Chuyển ảnh sang R2'}}
 }
 async function clSysSave(){
   const v={...CL.sys,org:$('csOrg').value.trim(),defaultSub:$('csSub').value.trim(),sessionDays:Math.max(1,Math.min(365,+$('csDays').value||30)),lockCrit:$('csLock').checked,auditorDelete:$('csDel').checked};
