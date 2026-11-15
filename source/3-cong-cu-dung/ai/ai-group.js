@@ -293,7 +293,9 @@ function gxEdit(g){
   d.replaceChildren(
     h('div',{class:'dh'},h('h2',null,`Sửa nhóm lỗi lặp lại · ${its.length} vị trí`),h('span',{class:'spacer'}),h('button',{class:'btn',type:'button',onclick:()=>d.close()},'Đóng')),
     h('div',{class:'db gxbody'},
-      h('div',{class:'qxgl'},...its.map(x=>h('div',{class:'qxgi'+(x===g.rep?' rep':'')},h('img',{src:x.p.thumb,alt:''}),h('small',null,`Ảnh ${x.pi+1}${(x.p.area||'').trim()?' · '+x.p.area.trim():''}`)))),
+      h('div',{class:'qxgl'},...its.map(x=>h('div',{class:'qxgi'+(x===g.rep?' rep':'')+(x.f.ok?' ok':' pend')},
+        h('div',{class:'qxgi-im'},h('img',{src:x.p.thumb,alt:''}),x===g.rep?h('span',{class:'qx-rep-bdg'},'★ Đại diện'):null,h('span',{class:'qx-st-dot '+(x.f.ok?'ok':'pend')},x.f.ok?'✓':'⏳')),
+        h('small',null,`Ảnh ${x.pi+1}${(x.p.area||'').trim()?' · '+x.p.area.trim():''}`)))),
       h('p',{class:'hint'},'Nội dung dưới đây áp dụng cho mọi lỗi trong nhóm (thống nhất mã, mức độ, khắc phục). Khi xuất file, nhóm là 1 lỗi duy nhất kèm số vị trí.'),
       fld('Loại lỗi theo danh mục (mã RBA, ID yêu cầu)',sR),
       fld('Nội dung lỗi chung',tT),

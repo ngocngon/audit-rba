@@ -232,6 +232,7 @@ function qxUnify(g){const R=g.rep.f;for(const{p,f}of g.items){if(f===R)continue;
   if(f.sev!==g.sev){f.sev=g.sev;ch=true}if(CFG.mandRule!=='ai')f.mand=f.sev==='Priority';if(ch)Store.touch(p)}
   if(R.sev!==g.sev){R.sev=g.sev;Store.touch(g.rep.p)}}
 function qxConfirm(g){qxUnify(g);let n=0;for(const{p,f}of g.items)if(!f.ok&&done(f)){f.ok=true;learn(f,p);Store.touch(p);n++}toast(n?`Đã xác nhận ${n} lỗi trong nhóm, thống nhất mã ${g.rep.f.req||g.rep.f.code||''} mức ${g.sev}.`:'Cả nhóm đã được xác nhận.');qxRefresh()}
+function qxUnconfirm(g){let n=0;for(const{p,f}of g.items)if(f.ok){f.ok=false;Store.touch(p);n++}if(n)toast(`Đã bỏ xác nhận ${n} vị trí trong nhóm.`);qxRefresh()}
 function qxSplit(p,f){f.nogrp=true;Store.touch(p);toast('Đã tách lỗi khỏi nhóm.');qxRefresh()}
 function qxSetRep(p,f){f.qxRep=Date.now();Store.touch(p);toast('Đã chọn ảnh này làm ảnh đại diện của nhóm.');qxRefresh()}
 function qxGo(p,f){S.listAll=false;S.cur=p.id;S.sel=f.id;if(typeof setDView==='function'&&!isMobile())setDView('review');renderAll();fit();if(isMobile())setView('review')}
@@ -243,21 +244,29 @@ function qxPanel(){
       h('b',null,`Lỗi lặp lại nhiều vị trí (${gs.length} nhóm · ${nf} lỗi)`),
       hotGs.length?h('span',{class:'qx-sum-alert'},`⚠️ ${hotGs.length} nhóm vi phạm cao cần kiểm tra kỹ${hotPend?` (${hotPend} chờ xác nhận)`:''}`):null,
       h('small',null,' · Xuất báo cáo gộp mỗi nhóm thành 1 dòng duy nhất')),
-    ...gs.map(g=>{const okN=g.items.length-g.pend,R=g.rep.f,firstTarget=(g.items.find(x=>!x.f.ok)||g.rep);
-      return h('div',{class:'qxg1'+(g.hot?' qx-'+g.hot:'')},
+    ...gs.map(g=>{const okN=g.items.length-g.pend,allOk=!g.pend,R=g.rep.f,firstTarget=(g.items.find(x=>!x.f.ok)||g.rep);
+      return h('div',{class:'qxg1'+(g.hot?' qx-'+g.hot:'')+(allOk&&!g.hot?' is-done':'')},
         g.hot?h('div',{class:'qxg-rib '+g.hot},
           h('b',null,g.hot==='crit'?`🔥 VI PHẠM CAO LẶP LẠI LIÊN TỤC (${g.sev} · ${g.items.length} vị trí) — KIỂM TRA KỸ`:`⚠️ LỖI NẶNG LẶP LẠI (${g.sev} · ${g.items.length} vị trí) — KIỂM TRA KỸ`),
           h('span',{class:'spacer'}),
           h('button',{class:'btn sm qx-chkbtn',type:'button',onclick:()=>qxGo(firstTarget.p,firstTarget.f)},g.pend?`Kiểm tra ngay (${g.pend} chờ) ›`:'Mở kiểm tra lại ›')):null,
-        h('div',{class:'qxgh'},h('span',{class:'pill '+g.sev},g.sev),h('span',{class:'tag'},R.req||R.code||'—'),h('b',null,g.r?g.r.t:R.title),h('span',{class:'spacer'}),h('small',null,`${g.items.length} vị trí · ${okN}/${g.items.length} đã xác nhận`)),
+        h('div',{class:'qxgh'},h('span',{class:'pill '+g.sev},g.sev),h('span',{class:'tag'},R.req||R.code||'—'),h('b',null,g.r?g.r.t:R.title),h('span',{class:'spacer'}),
+          h('small',null,`${g.items.length} vị trí`),
+          allOk?h('span',{class:'st-pill ok'},`✓ Đã xác nhận đủ (${okN}/${g.items.length})`):h('span',{class:'st-pill pend'},`⏳ Chờ xác nhận ${g.pend}/${g.items.length}`)),
         h('div',{class:'qxga'},'Khu vực: '+qxAreas(g.items).join('; ')),
-        h('div',{class:'qxgl'},...g.items.map(x=>h('div',{class:'qxgi'+(x===g.rep?' rep':'')+(x.f.ok?' ok':'')},
-          h('img',{src:x.p.thumb,alt:`Ảnh ${x.pi+1}`,title:x.f.title,onclick:()=>qxGo(x.p,x.f)}),
-          h('small',null,`${x.pi+1}.${x.n}${x===g.rep?' · đại diện':''}`),
-          h('div',{class:'qxgb'},x===g.rep?null:h('button',{class:'btn sm',title:'Dùng ảnh này làm ảnh đại diện khi xuất file',onclick:()=>qxSetRep(x.p,x.f)},'Đại diện'),h('button',{class:'btn sm',title:'Không gom lỗi này vào nhóm',onclick:()=>qxSplit(x.p,x.f)},'Tách'))))),
+        h('div',{class:'qxgl'},...g.items.map(x=>h('div',{class:'qxgi'+(x===g.rep?' rep':'')+(x.f.ok?' ok':' pend')},
+          h('div',{class:'qxgi-im'},
+            h('img',{src:x.p.thumb,alt:`Ảnh ${x.pi+1}`,title:x.f.title,onclick:()=>qxGo(x.p,x.f)}),
+            x===g.rep?h('span',{class:'qx-rep-bdg'},'★ Đại diện'):null,
+            h('span',{class:'qx-st-dot '+(x.f.ok?'ok':'pend')},x.f.ok?'✓':'⏳')),
+          h('small',{title:(x.p.area||'').trim()||`Ảnh ${x.pi+1}`},`${x.pi+1}.${x.n}${(x.p.area||'').trim()?' · '+x.p.area.trim():''}`),
+          h('div',{class:'qxgb'},x===g.rep?h('span',{class:'qx-rep-lbl',title:'Ảnh đang được chọn làm đại diện cho nhóm'},'★ Đại diện'):h('button',{class:'btn sm',title:'Dùng ảnh này làm ảnh đại diện khi xuất file',onclick:()=>qxSetRep(x.p,x.f)},'Đặt đại diện'),h('button',{class:'btn sm',title:'Không gom lỗi này vào nhóm',onclick:()=>qxSplit(x.p,x.f)},'Tách'))))),
         h('div',{class:'qxgf gxbar'},h('label',{class:'gxmode',title:'Ảnh dùng cho file Findings, PDF, ảnh báo cáo'},'Ảnh xuất: ',h('select',{'aria-label':'Ảnh xuất của nhóm',onchange:e=>gxSetMode(g,e.target.value)},h('option',{value:'collage',selected:gxMode(g)==='collage'},'Ghép ảnh các vị trí'),h('option',{value:'rep',selected:gxMode(g)==='rep'},'Ảnh đại diện'))),
           h('button',{class:'btn sm',onclick:()=>gxShow(g)},'Xem ảnh xuất'),h('button',{class:'btn sm primary',onclick:()=>gxEdit(g)},'Sửa nhóm & đối chiếu'),
-          h('button',{class:'btn sm good',onclick:()=>qxConfirm(g)},okN===g.items.length?'✓ Đã xác nhận nhóm':'✓ Xác nhận cả nhóm'),
+          ...(allOk
+            ?[h('span',{class:'st-pill ok'},'✓ Đã xác nhận nhóm'),
+              h('button',{class:'btn sm btn-unok',title:'Hoàn tác xác nhận cả nhóm về trạng thái Chờ xác nhận',onclick:()=>qxUnconfirm(g)},'↺ Bỏ xác nhận')]
+            :[h('button',{class:'btn sm btn-cfm',onclick:()=>qxConfirm(g)},okN?`Xác nhận nốt ${g.pend} vị trí`:`Xác nhận cả nhóm (${g.items.length})`)]),
           h('button',{class:'btn sm',onclick:()=>{qxUnify(g);toast(`Đã thống nhất mã ${R.req||R.code||''}, mức ${g.sev} cho cả nhóm.`);qxRefresh()}},'Thống nhất mã')))}));
 }
 {const _tf=tFilter;tFilter=function(st){const r=_tf(st);if(!QX_HOT_ONLY||!QX.cfg.group)return r;const m=qxMap();return r.filter(x=>{const g=m.get(x.f.id);return!!(g&&g.hot)})}}

@@ -255,8 +255,8 @@ function clAuditRow(a){
     h('div',{class:'clam'},h('b',null,vnDate(a.date)||'Chưa có ngày'),a.status==='locked'?h('span',{class:'pill Minor'},'Đã khóa'):null,here?h('span',{class:'pill okc'},'Đang mở trên máy này'):null,
       h('small',null,[a.sub,a.auditors&&('Auditor: '+a.auditors),'Người tạo: '+(a.owner_name||'—'),mem.length&&('Được giao: '+mem.join(', '))].filter(Boolean).join(' · ')),
       h('small',null,`${a.n_photos} ảnh · ${a.n_f} lỗi (${a.n_ok} đã xác nhận)${(a.areas||[]).length?' · '+a.areas.length+' khu vực':''} · cập nhật ${vnDT(a.updated_at)}`)),
-    h('div',{class:'claa'},h('button',{class:'btn sm',onclick:()=>{k.exp=exp?null:a.id;if(!exp&&!ph)clKhoPhotos(a);renderKho()}},exp?'Thu gọn':'Xem theo khu vực'),
-      h('button',{class:'btn sm primary',onclick:()=>clOpenAudit(a)},here?'Đang mở':a.can_edit?'Mở để sửa':'Mở để xem'),
+    h('div',{class:'claa'},h('button',{class:'btn sm'+(exp?' is-open':''),onclick:()=>{k.exp=exp?null:a.id;if(!exp&&!ph)clKhoPhotos(a);renderKho()}},exp?'Thu gọn ▴':'Xem theo khu vực'),
+      h('button',{class:'btn sm '+(here?'btn-cur':'primary'),onclick:()=>clOpenAudit(a)},here?'★ Đang mở':a.can_edit?'Mở để sửa':'Mở để xem'),
       clAdmin()?h('button',{class:'btn sm',onclick:()=>clMembersDialog(a)},'Giao người'):null,
       clAdmin()?h('button',{class:'btn sm',onclick:()=>clLock(a)},a.status==='locked'?'Mở khóa':'Khóa'):null,
       (clAdmin()||(CL.sys.auditorDelete&&a.owner_id===(CL.auth.user||{}).id))?h('button',{class:'btn sm danger',onclick:()=>clDelAudit(a)},'Xóa'):null));
