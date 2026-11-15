@@ -199,10 +199,12 @@ importFiles=async function(list){
   if(added){S.photos=S.photos.filter(p=>!p.sample);open(added.id);if(isMobile())setView('review');if(NET.off)queueBar('off');else if(bgReady()){bgAdd(news);toast(`Đã thêm ${news.length} ảnh${skip?` (${skip})`:''}. AI đang soát ngầm, anh có thể chụp tiếp.`)}}
 };
 
-/* ---------- 4. Gom lỗi lặp lại ở nhiều vị trí ---------- */
+/* ---------- 4. Gom lỗi lặp lại ở nhiều vị trí & làm nổi bật vi phạm cao lặp lại ---------- */
 const qxRank=v=>{const i=SEV.indexOf(v);return i<0?9:i};
+const qxHot=(sev,n)=>sev==='Priority'?'crit':sev==='Major'?(n>=3?'crit':'high'):'';
+const qxHotRank=lv=>lv==='crit'?0:lv==='high'?1:2;
 function qxKey(f){return f.rule?'r:'+f.rule:f.code?'c:'+f.code+'|'+(f.req||''):''}
-let QXG=null;
+let QXG=null,QX_HOT_ONLY=false;
 function qxGroups(onlyFin){
   if(!onlyFin&&QXG)return QXG;
   const real=S.photos.filter(p=>!p.sample),bk=new Map();
@@ -215,12 +217,14 @@ function qxGroups(onlyFin){
     for(const items of cl){if(items.length<2||new Set(items.map(x=>x.p.id)).size<2)continue;
       const rep=items.slice().sort((a,b)=>(b.f.qxRep||0)-(a.f.qxRep||0)||(b.f.ok-a.f.ok)||((b.f.conf||0)-(a.f.conf||0))||(b.p.w*b.p.h-a.p.w*a.p.h))[0];
       const sev=items.map(x=>x.f.sev).filter(Boolean).sort((a,b)=>qxRank(a)-qxRank(b))[0]||rep.f.sev;
-      out.push({id:rep.f.id,k,items,rep,sev,r:rep.f.rule?RULES[rep.f.rule]:null})}}
-  out.sort((a,b)=>qxRank(a.sev)-qxRank(b.sev)||b.items.length-a.items.length);
+      const pend=items.filter(x=>!x.f.ok).length,hot=qxHot(sev,items.length);
+      out.push({id:rep.f.id,k,items,rep,sev,pend,hot,r:rep.f.rule?RULES[rep.f.rule]:null})}}
+  out.sort((a,b)=>qxHotRank(a.hot)-qxHotRank(b.hot)||qxRank(a.sev)-qxRank(b.sev)||b.items.length-a.items.length||b.pend-a.pend);
   if(!onlyFin){QXG=out;setTimeout(()=>{QXG=null},0)}
   return out;
 }
-const qxGroupOf=f=>QX.cfg.group&&f?qxGroups().find(g=>g.items.some(x=>x.f===f)):null;
+function qxMap(){const m=new Map();if(!QX.cfg.group)return m;for(const g of qxGroups())for(const x of g.items)m.set(x.f.id,g);return m}
+const qxGroupOf=f=>QX.cfg.group&&f?qxMap().get(f.id)||null:null;
 function qxAreas(items){const m=new Map();for(const x of items){const a=(x.p.area||'').trim()||`Ảnh ${x.pi+1}`;m.set(a,(m.get(a)||0)+1)}return[...m].map(([a,n])=>n>1?`${a} (${n})`:a)}
 function qxRefresh(){QXG=null;renderAll();if(typeof renderDesk==='function')renderDesk()}
 function qxUnify(g){const R=g.rep.f;for(const{p,f}of g.items){if(f===R)continue;let ch=false;
@@ -230,13 +234,21 @@ function qxUnify(g){const R=g.rep.f;for(const{p,f}of g.items){if(f===R)continue;
 function qxConfirm(g){qxUnify(g);let n=0;for(const{p,f}of g.items)if(!f.ok&&done(f)){f.ok=true;learn(f,p);Store.touch(p);n++}toast(n?`Đã xác nhận ${n} lỗi trong nhóm, thống nhất mã ${g.rep.f.req||g.rep.f.code||''} mức ${g.sev}.`:'Cả nhóm đã được xác nhận.');qxRefresh()}
 function qxSplit(p,f){f.nogrp=true;Store.touch(p);toast('Đã tách lỗi khỏi nhóm.');qxRefresh()}
 function qxSetRep(p,f){f.qxRep=Date.now();Store.touch(p);toast('Đã chọn ảnh này làm ảnh đại diện của nhóm.');qxRefresh()}
-function qxGo(p,f){S.listAll=false;S.cur=p.id;S.sel=f.id;if(typeof setDView==='function'&&!isMobile())setDView('review');renderAll();fit()}
+function qxGo(p,f){S.listAll=false;S.cur=p.id;S.sel=f.id;if(typeof setDView==='function'&&!isMobile())setDView('review');renderAll();fit();if(isMobile())setView('review')}
 function qxPanel(){
   if(!QX.cfg.group)return null;const gs=qxGroups();if(!gs.length)return null;
-  const nf=gs.reduce((a,g)=>a+g.items.length,0);
-  return h('details',{class:'qxgrp',open:true},h('summary',null,h('b',null,`Lỗi lặp lại ở nhiều vị trí: ${gs.length} nhóm`),h('small',null,` · ${nf} lỗi. Mỗi nhóm là 1 lỗi duy nhất trong mọi file xuất (1 dòng Findings, 1 trang PDF, 1 ảnh báo cáo) với ảnh ghép các vị trí hoặc ảnh đại diện.`)),
-    ...gs.map(g=>{const okN=g.items.filter(x=>x.f.ok).length,R=g.rep.f;
-      return h('div',{class:'qxg1'},
+  const nf=gs.reduce((a,g)=>a+g.items.length,0),hotGs=gs.filter(g=>g.hot),hotPend=hotGs.reduce((a,g)=>a+g.pend,0);
+  return h('details',{class:'qxgrp'+(hotGs.length?' has-hot':''),open:true},
+    h('summary',null,
+      h('b',null,`Lỗi lặp lại nhiều vị trí (${gs.length} nhóm · ${nf} lỗi)`),
+      hotGs.length?h('span',{class:'qx-sum-alert'},`⚠️ ${hotGs.length} nhóm vi phạm cao cần kiểm tra kỹ${hotPend?` (${hotPend} chờ xác nhận)`:''}`):null,
+      h('small',null,' · Xuất báo cáo gộp mỗi nhóm thành 1 dòng duy nhất')),
+    ...gs.map(g=>{const okN=g.items.length-g.pend,R=g.rep.f,firstTarget=(g.items.find(x=>!x.f.ok)||g.rep);
+      return h('div',{class:'qxg1'+(g.hot?' qx-'+g.hot:'')},
+        g.hot?h('div',{class:'qxg-rib '+g.hot},
+          h('b',null,g.hot==='crit'?`🔥 VI PHẠM CAO LẶP LẠI LIÊN TỤC (${g.sev} · ${g.items.length} vị trí) — KIỂM TRA KỸ`:`⚠️ LỖI NẶNG LẶP LẠI (${g.sev} · ${g.items.length} vị trí) — KIỂM TRA KỸ`),
+          h('span',{class:'spacer'}),
+          h('button',{class:'btn sm qx-chkbtn',type:'button',onclick:()=>qxGo(firstTarget.p,firstTarget.f)},g.pend?`Kiểm tra ngay (${g.pend} chờ) ›`:'Mở kiểm tra lại ›')):null,
         h('div',{class:'qxgh'},h('span',{class:'pill '+g.sev},g.sev),h('span',{class:'tag'},R.req||R.code||'—'),h('b',null,g.r?g.r.t:R.title),h('span',{class:'spacer'}),h('small',null,`${g.items.length} vị trí · ${okN}/${g.items.length} đã xác nhận`)),
         h('div',{class:'qxga'},'Khu vực: '+qxAreas(g.items).join('; ')),
         h('div',{class:'qxgl'},...g.items.map(x=>h('div',{class:'qxgi'+(x===g.rep?' rep':'')+(x.f.ok?' ok':'')},
@@ -244,14 +256,64 @@ function qxPanel(){
           h('small',null,`${x.pi+1}.${x.n}${x===g.rep?' · đại diện':''}`),
           h('div',{class:'qxgb'},x===g.rep?null:h('button',{class:'btn sm',title:'Dùng ảnh này làm ảnh đại diện khi xuất file',onclick:()=>qxSetRep(x.p,x.f)},'Đại diện'),h('button',{class:'btn sm',title:'Không gom lỗi này vào nhóm',onclick:()=>qxSplit(x.p,x.f)},'Tách'))))),
         h('div',{class:'qxgf gxbar'},h('label',{class:'gxmode',title:'Ảnh dùng cho file Findings, PDF, ảnh báo cáo'},'Ảnh xuất: ',h('select',{'aria-label':'Ảnh xuất của nhóm',onchange:e=>gxSetMode(g,e.target.value)},h('option',{value:'collage',selected:gxMode(g)==='collage'},'Ghép ảnh các vị trí'),h('option',{value:'rep',selected:gxMode(g)==='rep'},'Ảnh đại diện'))),
-          h('button',{class:'btn sm',onclick:()=>gxShow(g)},'Xem ảnh xuất'),h('button',{class:'btn sm primary',onclick:()=>gxEdit(g)},'Sửa nhóm, thêm vấn đề')),
-        h('div',{class:'qxgf'},h('button',{class:'btn sm good',onclick:()=>qxConfirm(g)},okN===g.items.length?'✓ Đã xác nhận cả nhóm':'Xác nhận cả nhóm'),h('button',{class:'btn sm',onclick:()=>{qxUnify(g);toast(`Đã thống nhất mã ${R.req||R.code||''}, mức ${g.sev} cho cả nhóm.`);qxRefresh()}},'Thống nhất mã và mức độ')))}));
+          h('button',{class:'btn sm',onclick:()=>gxShow(g)},'Xem ảnh xuất'),h('button',{class:'btn sm primary',onclick:()=>gxEdit(g)},'Sửa nhóm & đối chiếu'),
+          h('button',{class:'btn sm good',onclick:()=>qxConfirm(g)},okN===g.items.length?'✓ Đã xác nhận nhóm':'✓ Xác nhận cả nhóm'),
+          h('button',{class:'btn sm',onclick:()=>{qxUnify(g);toast(`Đã thống nhất mã ${R.req||R.code||''}, mức ${g.sev} cho cả nhóm.`);qxRefresh()}},'Thống nhất mã')))}));
 }
-{const _rt=renderTable;renderTable=function(){_rt();try{if(iTyping())return;let box=$('qxGrp');if(!box){box=h('div',{id:'qxGrp'});$('tSel').before(box)}const pn=qxPanel();box.replaceChildren(...(pn?[pn]:[]))}catch(e){console.warn(e)}}}
-{const _ral=renderAllList;renderAllList=function(){_ral();try{if(iTyping())return;const pn=qxPanel();if(!pn)return;const L=$('list'),t=L.querySelector('.atool');t?t.after(pn):L.prepend(pn)}catch(e){console.warn(e)}}}
+{const _tf=tFilter;tFilter=function(st){const r=_tf(st);if(!QX_HOT_ONLY||!QX.cfg.group)return r;const m=qxMap();return r.filter(x=>{const g=m.get(x.f.id);return!!(g&&g.hot)})}}
+{const _rt=renderTable;renderTable=function(){_rt();try{if(iTyping())return;
+  const m=qxMap(),hotGs=qxGroups().filter(g=>g.hot),hotN=hotGs.reduce((a,g)=>a+g.items.length,0);
+  if(QX_HOT_ONLY&&!hotN){QX_HOT_ONLY=false;_rt()}
+  let hb=$('tHotBtn');const tool=document.querySelector('#tbl .ttool');
+  if(tool){if(!hb){hb=h('button',{id:'tHotBtn',class:'btn sm qx-flt',type:'button',onclick:()=>{QX_HOT_ONLY=!QX_HOT_ONLY;renderTable()}});tool.append(hb)}
+    hb.hidden=!hotN;hb.classList.toggle('on',QX_HOT_ONLY);hb.textContent=`⚠️ Cao lặp lại (${hotN})`}
+  document.querySelectorAll('#tBody tr[data-fid]').forEach(tr=>{const g=m.get(tr.dataset.fid);if(g&&g.hot)tr.classList.add('qx-'+g.hot)});
+  let box=$('qxGrp');if(!box){box=h('div',{id:'qxGrp'});$('tSel').before(box)}const pn=qxPanel();box.replaceChildren(...(pn?[pn]:[]))}catch(e){console.warn(e)}}}
+{const _ral=renderAllList;renderAllList=function(){_ral();try{if(iTyping())return;
+  const m=qxMap();document.querySelectorAll('#list .arow2[data-fid]').forEach(el=>{const g=m.get(el.dataset.fid);if(g&&g.hot)el.classList.add('qx-'+g.hot)});
+  const pn=qxPanel();if(!pn)return;const L=$('list'),t=L.querySelector('.atool');t?t.after(pn):L.prepend(pn)}catch(e){console.warn(e)}}}
+{const _rl0=renderList;renderList=function(){_rl0();try{if(S.listAll&&isMobile())return;const p=cur();if(!p||p.sample||!QX.cfg.group)return;
+  const m=qxMap(),L=$('list'),hots=[];
+  p.findings.forEach((f,i)=>{const g=m.get(f.id);if(!g||!g.hot)return;hots.push({f,i,g});
+    const card=L.querySelector(`.card[data-id="${f.id}"]`);if(!card)return;
+    card.classList.add('qx-'+g.hot);
+    card.prepend(h('div',{class:'qx-card-rib '+g.hot,onclick:e=>e.stopPropagation()},
+      h('span',null,g.hot==='crit'?`🔥 Lặp lại ${g.items.length} vị trí · ${g.sev} — Kiểm tra kỹ`:`⚠️ Lặp lại ${g.items.length} vị trí · ${g.sev} — Kiểm tra kỹ`),
+      h('button',{class:'qx-rib-btn',type:'button',onclick:e=>{e.stopPropagation();if(typeof gxEdit==='function')gxEdit(g)}},`Xem ${g.items.length} ảnh ›`)))});
+  if(hots.length){
+    const topLv=hots.some(x=>x.g.hot==='crit')?'crit':'high';
+    L.prepend(h('div',{class:'qx-pban '+topLv},
+      h('div',{class:'qx-pban-t'},h('b',null,`⚠️ Ảnh có ${hots.length} vi phạm mức cao lặp lại nhiều vị trí`),h('small',null,'Hãy kiểm tra kỹ vùng khoanh, bằng chứng và mức độ trước khi xác nhận.')),
+      h('div',{class:'qx-pban-chips'},...hots.map(({f,i,g})=>h('button',{class:'qx-jchip '+g.hot,type:'button',onclick:()=>select(f.id)},`#${i+1} ${f.req||f.code||g.sev} (${g.items.length} vị trí)`)))))}
+}catch(e){console.warn(e)}}}
+{const _rth=renderThumbs;renderThumbs=function(){_rth();try{if(!QX.cfg.group)return;
+  const m=qxMap();S.photos.forEach(p=>{if(p.sample)return;let lv='',pendHot=false;
+    for(const f of p.findings){const g=m.get(f.id);if(!g||!g.hot)continue;if(g.hot==='crit'||!lv)lv=g.hot;if(!f.ok)pendHot=true}
+    if(!lv)return;const el=document.querySelector(`#thumbs .thumb[data-pid="${p.id}"]`);if(!el)return;
+    el.classList.add('qx-th-'+lv);
+    if(pendHot){const c=el.querySelector('.counts');if(c)c.prepend(h('i',{class:'tick qxhot '+lv,style:'font-style:normal',title:'Có lỗi mức cao lặp lại nhiều vị trí cần kiểm tra kỹ',text:'⚠️'}))}
+  })}catch(e){console.warn(e)}}}
+{const _rd=renderDash;renderDash=function(){_rd();try{if(!QX.cfg.group)return;
+  const hotGs=qxGroups().filter(g=>g.hot);if(!hotGs.length)return;
+  const B=$('dashB'),kp=B&&B.querySelector('.kpis');if(!kp)return;
+  const hotPend=hotGs.reduce((a,g)=>a+g.pend,0);
+  kp.after(h('div',{class:'dcard qx-dash-alert'},
+    h('div',{class:'qx-da-hd'},
+      h('div',null,h('h3',null,`⚠️ Vi phạm mức cao lặp lại liên tục (${hotGs.length} nhóm)`),
+        h('p',{class:'hint'},hotPend?`Còn ${hotPend} vị trí chưa xác nhận — ưu tiên kiểm tra kỹ khung khoanh, bằng chứng và tính thống nhất giữa các khu vực.`:'Tất cả vị trí trong nhóm đã xác nhận — nên rà lại lần cuối trước khi xuất báo cáo.')),
+      h('button',{class:'btn sm primary',type:'button',onclick:()=>{QX_HOT_ONLY=true;S.tf.st='';setDView('table')}},'Lọc kiểm tra tất cả ›')),
+    h('div',{class:'qx-da-list'},...hotGs.slice(0,6).map(g=>{const R=g.rep.f,t0=g.items.find(x=>!x.f.ok)||g.rep;
+      return h('div',{class:'qx-da-row '+g.hot},
+        h('span',{class:'pill '+g.sev},g.sev),
+        h('div',{class:'qx-da-m'},h('b',null,`${R.req||R.code?`[${R.req||R.code}] `:''}${g.r?g.r.t:R.title}`),
+          h('small',null,`Lặp lại ${g.items.length} vị trí (${qxAreas(g.items).join('; ')}) · ${g.pend?`${g.pend} chờ xác nhận`:'✓ Đã xác nhận đủ'}`)),
+        h('div',{class:'qx-da-act'},
+          h('button',{class:'btn sm',type:'button',onclick:()=>qxGo(t0.p,t0.f)},'Kiểm tra ảnh ›'),
+          typeof gxEdit==='function'?h('button',{class:'btn sm',type:'button',onclick:()=>gxEdit(g)},'Đối chiếu nhóm'):null))}))))}catch(e){console.warn(e)}}}
 {const _dt=dupTag;dupTag=function(p,f){const a=_dt(p,f),g=qxGroupOf(f);
-  const fx=f&&f.qxFix?h('span',{class:'tag qxfx',title:`AI chọn ${[f.qxFix.rule||'KHAC',f.qxFix.req||f.qxFix.code,f.qxFix.sev].filter(Boolean).join(' / ')}; app sửa theo bảng quy tắc thành ${f.rule} (${f.req||f.code}, ${f.sev})`},'Đã chỉnh mã theo bảng quy tắc'):null;
-  const gt=g?h('span',{class:'tag qxg',title:'Khu vực: '+qxAreas(g.items).join('; ')},`Lặp lại · ${g.items.length} vị trí`):null;
+  const fx=f&&f.qxFix?h('span',{class:'tag qxfx',title:`AI chọn ${[f.qxFix.rule||'KHAC',f.qxFix.req||f.qxFix.code,f.qxFix.sev].filter(Boolean).join(' / ')}; app sửa theo bảng quy tắc thành ${f.rule} (${f.req||f.code}, ${f.sev})`},'Đã chỉnh mã'):null;
+  const gt=g?(g.hot?h('button',{class:'tag qxg qx-hot-tag '+g.hot,type:'button',title:'Bấm để đối chiếu cả nhóm tại các khu vực: '+qxAreas(g.items).join('; '),onclick:e=>{e.stopPropagation();if(typeof gxEdit==='function')gxEdit(g)}},`⚠️ Lặp ${g.items.length} vị trí · Kiểm tra kỹ`):
+    h('span',{class:'tag qxg',title:'Khu vực: '+qxAreas(g.items).join('; ')},`Lặp lại · ${g.items.length} vị trí`)):null;
   if(!fx&&!gt)return a;return h('span',{class:'qxtags'},a,gt,fx)}}
 
 /* Xuất file: mọi file xuất dùng chung cách gom nhóm — xem ai-group.js (v1.6.2) */

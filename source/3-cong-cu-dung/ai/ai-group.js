@@ -54,7 +54,7 @@ function gxChemHelp(open){
   return h('details',{class:'gxch',open:!!open,onclick:e=>e.stopPropagation()},h('summary',null,'Tra cứu: hóa chất nào cần khay chống tràn, thông gió, hút mùi'),
     h('dl',null,...GX_CHEM.flatMap(([a,b])=>[h('dt',null,a),h('dd',null,b)])));
 }
-{const _cf=cardForm;cardForm=function(f){const el=_cf(f);try{if(f&&GX_CHEM_IDS.has(f.rule))el.append(gxChemHelp())}catch(e){console.warn(e)}return el}}
+{const _cf=cardForm;cardForm=function(f){const el=_cf(f);try{if(f&&GX_CHEM_IDS.has(f.rule))(el.querySelector('.f-ext')||el).append(gxChemHelp())}catch(e){console.warn(e)}return el}}
 
 /* ---------- 3. Gợi ý vấn đề có thể có (ô tích khi mở ảnh) ---------- */
 const SX_PROMPT=`VẤN ĐỀ NGHI NGỜ (chưa đủ rõ để kết luận)
@@ -84,7 +84,8 @@ const SX_SC=[
   {n:'khu chất thải',re:/chat thai|rac|phe lieu|ctnh/,ids:['T1','T2','T3','T4']}
 ];
 function sxScene(text,n){const t=' '+qn(text).replace(/[^a-z0-9]+/g,' ')+' ';return SX_SC.filter(s=>s.re.test(t)).slice(0,n||2)}
-let SX_OPEN=true;
+let SX_OPEN=false;
+const SX_SRCR={'AI nghi ngờ':0,'Cần kiểm tra':1,'AI đã loại':2,'Thường gặp':3};
 function sxItems(p){
   if(!p||p.sample)return[];const A=p.analysis||{},out=[],seen=new Set(),used=new Set();
   const have=new Set(p.findings.filter(f=>!f.sug).map(f=>f.rule).filter(Boolean));
@@ -98,7 +99,7 @@ function sxItems(p){
     if(!m&&nq<3){const id=sxGuessId(v);if(id&&!have.has(id)&&!used.has(id)&&RULES[id]){add({key:'q:'+id,rule:id,title:RULES[id].t,why:String(v),src:'Cần kiểm tra'});nq++}}}
   const text=[p.area,p.note,A.scene,...p.findings.map(f=>f.title),...(A.suspect||[]).map(s=>s.title)].filter(Boolean).join(' ');
   let ns=0;for(const sc of sxScene(text,2))for(const id of sc.ids){if(ns>=8)break;if(!RULES[id]||have.has(id)||used.has(id))continue;add({key:'r:'+id,rule:id,title:RULES[id].t,why:`Thường gặp ở ảnh ${sc.n}`,src:'Thường gặp'});ns++}
-  return out;
+  return out.sort((a,b)=>(SX_SRCR[a.src]??9)-(SX_SRCR[b.src]??9)||qxRank(a.rule&&RULES[a.rule]?RULES[a.rule].v:'')-qxRank(b.rule&&RULES[b.rule]?RULES[b.rule].v:''));
 }
 const gxShape=s=>JSON.parse(JSON.stringify(s||{t:'rect',x:.03,y:.03,w:.94,h:.94}));
 function gxFill(f,r){Object.assign(f,{rule:r.id,code:r.c,req:r.q,law:lawStr(r.l),sev:r.v,fixNow:r.n,fixRoot:r.x,cause:r.z,kind:r.kd==='hazard'?'hazard':'violation',mand:r.v==='Priority'})}
@@ -114,15 +115,17 @@ function sxPanel(p){
   const its=sxItems(p);if(!its.length)return null;const on=new Map(p.findings.filter(f=>f.sug).map(f=>[f.sug,f]));
   const n=its.filter(it=>on.has(it.key)).length;
   return h('details',{class:'sxp',open:SX_OPEN,onclick:e=>e.stopPropagation(),ontoggle:e=>{SX_OPEN=e.currentTarget.open}},
-    h('summary',null,h('b',null,'Vấn đề có thể có — tích để thêm lỗi'),h('small',null,` ${its.length} gợi ý${n?` · đã thêm ${n}`:''}`)),
+    h('summary',null,h('b',null,'Gợi ý kiểm tra thêm'),h('small',null,` · ${its.length} mục${n?` (đã chọn ${n})`:''}`)),
     h('div',{class:'sxl'},...its.map(it=>{const r=it.rule&&RULES[it.rule],f=on.get(it.key);
       return h('label',{class:'sxi'+(f?' on':'')},h('input',{type:'checkbox',checked:!!f,onchange:e=>sxToggle(p,it,e.target.checked)}),
-        h('span',null,h('b',null,it.title),h('small',null,h('i',{class:'sxs '+(it.src==='AI nghi ngờ'?'ai':it.src==='AI đã loại'?'drop':it.src==='Cần kiểm tra'?'chk':'')},it.src),
-          r?` ${r.q} · ${r.v}`:'',it.why?` · ${it.why}`:'',f&&f.ok?' · ✓ đã xác nhận':'')))})),
-    h('p',{class:'sxh'},'Tích chọn sẽ thêm lỗi chờ xác nhận (khung bao vùng nghi ngờ hoặc gần cả ảnh). Kiểm tra tại chỗ, chỉnh khung rồi bấm Xác nhận. Bỏ tích để xóa lỗi vừa thêm.'));
+        h('span',null,h('b',null,it.title),h('small',null,
+          r?h('i',{class:'sxs sev-'+r.v},r.v):null,' ',
+          h('i',{class:'sxs '+(it.src==='AI nghi ngờ'?'ai':it.src==='AI đã loại'?'drop':it.src==='Cần kiểm tra'?'chk':'')},it.src),
+          r?` · ${r.q}`:'',it.why?` · ${it.why}`:'',f&&f.ok?' · ✓ đã xác nhận':'')))})),
+    h('p',{class:'sxh'},'Tích chọn để thêm thành lỗi chờ xác nhận. Kiểm tra tại chỗ, chỉnh khung rồi bấm Xác nhận.'));
 }
 {const _rl=renderList;renderList=function(){_rl();try{if(S.listAll&&isMobile())return;const p=cur();if(!p||p.sample||p.bgRun)return;
-  const pn=sxPanel(p);if(!pn)return;const L=$('list'),hd=L.querySelector(':scope>.hintd');hd?hd.after(pn):L.prepend(pn)}catch(e){console.warn(e)}}}
+  const pn=sxPanel(p);if(!pn)return;const sub=$('lSub')||$('list');sub.prepend(pn)}catch(e){console.warn(e)}}}
 
 /* ---------- 1. Một nhóm = một lỗi duy nhất trong mọi file xuất ---------- */
 const GX_FULL={t:'rect',x:.004,y:.004,w:.992,h:.992};
@@ -131,7 +134,7 @@ const QXC=new Map();
 function gxMode(g){const x=g.items.find(x=>x.f.qxMode);return x?x.f.qxMode:(QX.cfg.groupImg||'collage')}
 function gxSetMode(g,m){for(const x of g.items){x.f.qxMode=m;Store.touch(x.p)}toast(m==='collage'?'Nhóm này xuất bằng ảnh ghép các vị trí.':'Nhóm này xuất bằng ảnh đại diện.');qxRefresh()}
 const gxOrder=g=>[g.rep,...g.items.filter(x=>x!==g.rep)];
-function gxSig(g){const LL=capLang();return g.k+'|'+g.sev+'|'+LL+'|'+(LL!=='vi'?[...new Set(g.items.map(x=>capOf(LL,x.p.area)))].join('~')+'|':'')+gxOrder(g).map(x=>{const b=bbox(x.f.s);return[x.p.id,x.f.id,x.p.w,x.p.h,x.pi,(x.p.area||'').trim(),b.x.toFixed(3),b.y.toFixed(3),b.w.toFixed(3),b.h.toFixed(3)].join(':')}).join(',')}
+function gxSig(g){const LL=capLang();return'v2|'+g.k+'|'+g.sev+'|'+LL+'|'+gxOrder(g).map(x=>{const b=bbox(x.f.s);return[x.p.id,x.f.id,x.p.w,x.p.h,b.x.toFixed(3),b.y.toFixed(3),b.w.toFixed(3),b.h.toFixed(3)].join(':')}).join(',')}
 async function gxCollage(g){
   await fonts();
   const its=gxOrder(g),show=its.slice(0,4),more=its.length-show.length,n=show.length;
@@ -148,10 +151,7 @@ async function gxCollage(g){
       G.drawImage(im,cx,cy,cw,ch,tx,ty,tw,th);
       const X=tx+(ux0-cx)*k,Y=ty+(uy0-cy)*k,BW=(ux1-ux0)*k,BH=(uy1-uy0)*k;
       G.lineJoin='round';G.strokeStyle='#FFFFFF';G.lineWidth=11;G.strokeRect(X,Y,BW,BH);G.strokeStyle=col;G.lineWidth=6;G.strokeRect(X,Y,BW,BH)}
-    const LL=capLang(),ar=(p.area||'').trim(),arX=LL!=='vi'&&ar?capOf(LL,ar):'',cap=`Ảnh ${x.pi+1}${LL!=='vi'&&CAPL[LL]?' / '+CAPL[LL].photo+' '+(x.pi+1):''}${ar?' · '+ar:''}${arX?' / '+arX:''}`;G.font=`600 30px ${fontL(LL)}`;
-    let t=cap;while(t.length>4&&G.measureText(t).width>tw-40)t=t.slice(0,-2);if(t!==cap)t=t.replace(/\s*\S?$/,'')+'…';
-    G.fillStyle='rgba(10,14,16,.68)';G.fillRect(tx,ty+th-54,tw,54);G.fillStyle='#FFFFFF';G.textBaseline='middle';G.textAlign='left';G.fillText(t,tx+20,ty+th-27);
-    if(more>0&&i===n-1){G.fillStyle='rgba(10,14,16,.5)';G.fillRect(tx,ty,tw,th-54);G.fillStyle='#FFFFFF';G.textAlign='center';G.font=`700 96px ${fontD}`;G.fillText(`+${more}`,tx+tw/2,ty+(th-54)/2-24);const LL=capLang(),MX={ko:'기타 위치',zh:'其他位置',en:'other locations'};G.font=`600 34px ${fontL(LL)}`;G.fillText('vị trí khác',tx+tw/2,ty+(th-54)/2+50);if(MX[LL]){G.font=`500 30px ${fontL(LL)}`;G.fillText(MX[LL],tx+tw/2,ty+(th-54)/2+92)}}
+    if(more>0&&i===n-1){G.fillStyle='rgba(10,14,16,.52)';G.fillRect(tx,ty,tw,th);G.fillStyle='#FFFFFF';G.textBaseline='middle';G.textAlign='center';G.font=`700 96px ${fontD}`;G.fillText(`+${more}`,tx+tw/2,ty+th/2-24);const LL=capLang(),MX={ko:'기타 위치',zh:'其他位置',en:'other locations'};G.font=`600 34px ${fontL(LL)}`;G.fillText('vị trí khác',tx+tw/2,ty+th/2+50);if(MX[LL]){G.font=`500 30px ${fontL(LL)}`;G.fillText(MX[LL],tx+tw/2,ty+th/2+92)}}
     G.restore()}
   return c;
 }
@@ -245,8 +245,8 @@ function gxEdit(g){
   const ta=(v,rows,ph)=>h('textarea',{rows:rows||2,value:v||'',placeholder:ph||null});
   const fld=(label,el)=>h('label',{class:'gxf'},h('span',null,label),el);
   const tT=ta(R.title,2),tE=ta(R.ev,2),tN=ta(R.fixNow,2),tX=ta(R.fixRoot,3),tF=ta('',3,'Mỗi dòng một vấn đề. Ví dụ: Ốc siết thanh cái bị gỉ sét');
-  const grp={};for(const r of RBA.rules)(grp[r.g]=grp[r.g]||[]).push(r);
-  const sR=h('select',{'aria-label':'Loại lỗi theo danh mục'},h('option',{value:''},R.rule?'— Giữ nguyên —':'— Chưa chọn (giữ mã hiện tại) —'),...Object.entries(grp).map(([gn,l])=>h('optgroup',{label:gn},...l.map(r=>h('option',{value:r.id,selected:r.id===R.rule},`${r.id} · ${r.t} (${r.q} · ${r.v})`)))));
+  const grpEntries=typeof catGroups==='function'?catGroups():Object.entries(RBA.rules.reduce((m,r)=>((m[r.g]=m[r.g]||[]).push(r),m),{}));
+  const sR=h('select',{'aria-label':'Loại lỗi theo danh mục'},h('option',{value:''},R.rule?'— Giữ nguyên —':'— Chưa chọn (giữ mã hiện tại) —'),...grpEntries.map(([gn,l],gi)=>h('optgroup',{label:`${gi+1}. ${gn}`},...l.map(r=>h('option',{value:r.id,selected:r.id===R.rule},`[${r.v}] ${r.id} · ${r.t} (${r.q})`)))));
   const sV=h('select',{'aria-label':'Mức độ'},...SEV.map(s=>h('option',{value:s,selected:s===g.sev},s)));
   const sug=h('div',{class:'gxsug'}),chem=h('div');
   let last=R.rule;
@@ -309,7 +309,7 @@ function gxEdit(g){
 
 /* ---------- Cài đặt: ảnh xuất mặc định của nhóm ---------- */
 {const box=[...document.querySelectorAll('.aixbox h4')].find(x=>x.textContent==='Kiểm soát chất lượng kết quả');
-  if(box)box.parentNode.append(h('label',{class:'aixo gxset'},h('span',null,h('b',null,'Ảnh xuất mặc định của nhóm lỗi lặp lại'),h('small',null,'Ghép ảnh: 1 ảnh gồm tối đa 4 vị trí (khoanh vùng lỗi, ghi số ảnh và khu vực). Ảnh đại diện: dùng 1 ảnh rõ nhất (chọn bằng nút "Đại diện"). Có thể đổi riêng từng nhóm.')),
+  if(box)box.parentNode.append(h('label',{class:'aixo gxset'},h('span',null,h('b',null,'Ảnh xuất mặc định của nhóm lỗi lặp lại'),h('small',null,'Ghép ảnh: 1 ảnh gồm tối đa 4 vị trí (khoanh vùng lỗi tại từng vị trí). Ảnh đại diện: dùng 1 ảnh rõ nhất (chọn bằng nút "Đại diện"). Có thể đổi riêng từng nhóm.')),
     h('select',{'aria-label':'Ảnh xuất mặc định',onchange:e=>{QX.cfg.groupImg=e.target.value;QX.save();toast('Đã lưu ảnh xuất mặc định của nhóm.');qxRefresh()}},
       h('option',{value:'collage',selected:QX.cfg.groupImg!=='rep'},'Ghép ảnh các vị trí'),h('option',{value:'rep',selected:QX.cfg.groupImg==='rep'},'Ảnh đại diện'))))}
 window.__GX={chem:GX_CHEM,sx:sxItems,prep:qxPrep,cache:QXC};
