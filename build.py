@@ -126,6 +126,7 @@ def main() -> None:
         shutil.copy2(TOOLS / "_headers", out / "_headers")
         run_py(str(TOOLS / "patch_cloud.py"), str(idx), api)
         run_py(str(TOOLS / "patch_ai.py"), str(idx))
+        run_py(str(TOOLS / "rba" / "patch_rba.py"), str(idx))
         (out / ".nojekyll").touch()
 
         # Kiểm tra cú pháp toàn bộ mã JS sinh ra và mã máy chủ trước khi ghi đè vào docs/

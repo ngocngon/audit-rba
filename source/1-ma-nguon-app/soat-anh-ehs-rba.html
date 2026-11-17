@@ -843,12 +843,12 @@ details.hintd>summary::-webkit-details-marker{display:none}
       <select id="tSev" aria-label="Mức độ"><option value="">Mọi mức độ</option><option>Priority</option><option>Major</option><option>Minor</option><option value="none">Chưa có mức độ</option></select>
       <select id="tSt" aria-label="Trạng thái"><option value="">Mọi trạng thái</option><option value="pend">Chờ xác nhận</option><option value="ok">Đã xác nhận</option></select>
       <select id="tKind" aria-label="Loại"><option value="">Mọi loại</option><option value="violation">Vi phạm</option><option value="hazard">Mối nguy tiềm ẩn</option></select>
-      <select id="tCode" aria-label="Mã RBA"><option value="">Mọi mã</option></select>
+      <select id="tCode" aria-label="Hạng mục vi phạm"><option value="">Mọi hạng mục</option></select>
       <select id="tArea" aria-label="Khu vực"><option value="">Mọi khu vực</option></select>
       <button class="btn" id="tClear">Xóa lọc</button></div>
     <div class="tflt-bar" id="tActiveFlt" hidden></div>
     <div class="tsel" id="tSel" hidden></div>
-    <div class="tscroll"><table class="ftab"><thead><tr><th class="c0"><input type="checkbox" id="tAll" aria-label="Chọn tất cả lỗi đang hiện"></th><th>#</th><th>Ảnh</th><th>Khu vực</th><th>Nội dung lỗi</th><th>Mã</th><th>Mức độ</th><th>Loại</th><th>Hạn</th><th>Trạng thái</th><th></th></tr></thead><tbody id="tBody"></tbody></table></div>
+    <div class="tscroll"><table class="ftab"><thead><tr><th class="c0"><input type="checkbox" id="tAll" aria-label="Chọn tất cả lỗi đang hiện"></th><th>#</th><th>Ảnh</th><th>Khu vực</th><th>Nội dung lỗi</th><th>Hạng mục (bấm để đổi)</th><th>Mức độ</th><th>Loại</th><th>Hạn</th><th>Trạng thái</th><th></th></tr></thead><tbody id="tBody"></tbody></table></div>
     <p class="hint" id="tFoot"></p>
   </div></section>
   <section class="spage" id="settings" aria-label="Cài đặt hệ thống"><div class="dwrap">
@@ -1092,7 +1092,7 @@ async function newAudit(){
 }
 function removePhotos(ids){
   const set=new Set(ids);for(const id of set)Store.del(id);S.photos=S.photos.filter(p=>!set.has(p.id));
-  if(!S.photos.length)addSample();else if(set.has(S.cur))S.cur=S.photos[0].id;S.sel=null;renderAll();fit();
+  if(!S.photos.length)addSample();else if(set.has(S.cur))S.cur=S.photos[0].id;S.sel=null;renderAll();if(typeof renderDesk==='function')renderDesk();fit();
 }
 function renderPtool(){
   const T=$('ptool'),real=S.photos.filter(p=>!p.sample);T.replaceChildren();
@@ -1180,7 +1180,8 @@ function setDView(v){
 function grpHub(){const R=['Thông tin audit','Xuất báo cáo','Hiện trường và làm việc nhóm'];document.querySelectorAll('.hubb>*').forEach(el=>{const t=(el.querySelector('h3')||{}).textContent||'';el.dataset.grp=R.some(r=>t.startsWith(r))?'report':'know'})}
 let deskQ=0;function deskSoon(){if(isMobile()||deskQ)return;deskQ=requestAnimationFrame(()=>{deskQ=0;renderDesk()})}
 function deskStats(){
-  const real=S.photos.filter(p=>!p.sample),its=real.flatMap((p,pi)=>p.findings.map((f,i)=>({p,f,pi,n:i+1})));
+  const sortP=typeof rbaSortPhotos==='function'?rbaSortPhotos:a=>a;
+  const real=sortP(S.photos.filter(p=>!p.sample)),its=real.flatMap((p,pi)=>p.findings.map((f,i)=>({p,f,pi,n:i+1})));
   const sev={};for(const s of SEV)sev[s]=its.filter(x=>x.f.sev===s).length;
   return{real,its,sev,an:real.filter(p=>p.analysis||p.findings.length).length,run:real.filter(p=>p.bgRun).length,
     ok:its.filter(x=>x.f.ok).length,pend:its.filter(x=>done(x.f)&&!x.f.ok).length,viol:its.filter(x=>kindOf(x.f)==='violation').length,
@@ -1378,10 +1379,12 @@ function renderTable(){
   const lsBtn=$('tLessonsBtn');if(lsBtn){lsBtn.textContent=`🧠 Sổ tự học (${Learn.items.length})`;lsBtn.onclick=openLessonsModal}
   const caBtn=$('tConfirmAll');if(caBtn){caBtn.hidden=!st.pend;if(st.pend){caBtn.classList.remove('is-armed');caBtn.textContent=`✓ Xác nhận tất cả ${st.pend} lỗi chờ`;caBtn.onclick=e=>{const b=e.currentTarget;if(Date.now()-tCfmArm>4000){tCfmArm=Date.now();b.classList.add('is-armed');b.textContent=`⚠️ Bấm lần nữa để xác nhận ${st.pend} lỗi`;setTimeout(()=>{if(b.isConnected){b.classList.remove('is-armed');b.textContent=`✓ Xác nhận tất cả ${st.pend} lỗi chờ`}},4000);return}tCfmArm=0;const n=confirmPending();renderTable();toast(`Đã xác nhận tất cả ${n} lỗi đang chờ.`)}}}
   const ov=$('tOverview');if(ov){const cb=renderControlBoard(st,false);ov.replaceChildren(...(cb?[cb]:[]))}
-  fillSel('tCode',[...new Set(st.its.map(x=>x.f.code).filter(Boolean))].sort(),T.code,c=>RBA.codes[c]?`${c} · ${RBA.codes[c].t}`:c);
+  const codeSet=[...new Set(st.its.map(x=>(typeof rbaCodeOf==='function'?rbaCodeOf(x.f,x.p):x.f.code)).filter(Boolean))];
+  if(typeof rbaRank==='function')codeSet.sort((a,b)=>rbaRank(a)-rbaRank(b));else codeSet.sort();
+  fillSel('tCode',codeSet,T.code,c=>typeof rbaShortLabel==='function'?rbaShortLabel(c):(RBA.codes[c]?`${c} · ${RBA.codes[c].t}`:c));
   fillSel('tArea',[...new Set(st.its.map(x=>(x.p.area||'Chưa ghi khu vực').trim()))].sort(),T.area);
   for(const[k,id]of[['sev','tSev'],['st','tSt'],['kind','tKind']])$(id).value=T[k];if(document.activeElement!==$('tQ'))$('tQ').value=T.q;
-  const rows=tFilter(st);if(!S.fsel)S.fsel=null;
+  const rows=typeof rbaRowCmp==='function'?tFilter(st).sort(rbaRowCmp):tFilter(st);if(!S.fsel)S.fsel=null;
   const dm=$('tDetailMeta');if(dm)dm.textContent=st.its.length?`Đang hiển thị ${rows.length}/${st.its.length} lỗi chi tiết · Bấm tiêu đề lỗi hoặc nút Sửa để chỉnh ngay tại chỗ`:'Chưa có phát hiện nào';
   const af=$('tActiveFlt');
   if(af){
@@ -1405,15 +1408,15 @@ function renderTable(){
     return [h('tr',{class:(f.ok?'ok':'')+(on?' picked':''),'data-fid':f.id},
       h('td',null,h('input',{type:'checkbox',checked:on,'aria-label':`Chọn lỗi ${pi+1}.${n}`,onchange:e=>{S.fsel=S.fsel||new Set();e.target.checked?S.fsel.add(f.id):S.fsel.delete(f.id);if(!S.fsel.size)S.fsel=null;renderTable()}})),
       h('td',{class:'nowrap'},`${pi+1}.${n}`),
-      h('td',null,h('img',{src:p.thumb,alt:`Ảnh ${pi+1}`,onclick:()=>edit(p,f)})),
+      h('td',null,h('div',{class:'tthumb-w'},h('img',{src:p.thumb,alt:`Ảnh ${pi+1}`,onclick:()=>edit(p,f)}),typeof rbaDelPhotoBtn==='function'?rbaDelPhotoBtn(p):null)),
       h('td',null,p.area||'Chưa ghi'),
       h('td',null,h('div',{class:'tt',onclick:()=>iToggle(f)},f.pending?'AI đang xác định lỗi…':(f.title||'Chưa có nội dung lỗi')),dupTag(p,f)),
-      h('td',{class:'nowrap'},f.req||f.code||'—'),
+      h('td',{class:'nowrap'},typeof rbaQuick==='function'?rbaQuick(p,f,false):(f.req||f.code||'—')),
       h('td',null,f.sev?h('span',{class:'pill '+f.sev},f.sev):'—'),
       h('td',null,KINDS[kindOf(f)]),
       h('td',{class:'nowrap'},due?vnDate(due):'—'),
       h('td',null,h('span',{class:'st-pill '+(f.ok?'ok':'pend')},f.ok?'✓ Đã xác nhận':'⏳ Chờ xác nhận'),!f.ok&&f.src==='ai'&&f.conf!=null?h('small',{class:'st-sub'},`Độ chắc chắn AI ${f.conf}%`):null),
-      h('td',null,h('div',{class:'ta'},f.ok?h('button',{class:'btn sm btn-unok',title:'Hoàn tác về trạng thái Chờ xác nhận',onclick:()=>toggleOk(p,f)},'↺ Bỏ XN'):h('button',{class:'btn sm btn-cfm',onclick:()=>toggleOk(p,f)},'Xác nhận'),h('button',{class:'btn sm'+(S.ied===f.id?' is-open':''),onclick:()=>iToggle(f)},S.ied===f.id?'Đang sửa ▴':'Sửa')))),S.ied===f.id?h('tr',{class:'iedrow'},h('td',{colspan:'11'},iEditor(p,f,n))):null].filter(Boolean)}):
+      h('td',null,h('div',{class:'ta'},f.ok?h('button',{class:'btn sm btn-unok',title:'Hoàn tác về trạng thái Chờ xác nhận',onclick:()=>toggleOk(p,f)},'↺ Bỏ XN'):h('button',{class:'btn sm btn-cfm',onclick:()=>toggleOk(p,f)},'Xác nhận'),h('button',{class:'btn sm'+(S.ied===f.id?' is-open':''),onclick:()=>iToggle(f)},S.ied===f.id?'Đang sửa ▴':'Sửa'),typeof rbaDelBtn==='function'?rbaDelBtn(p,f):null))),S.ied===f.id?h('tr',{class:'iedrow'},h('td',{colspan:'11'},iEditor(p,f,n))):null].filter(Boolean)}):
     [h('tr',null,h('td',{colspan:'11'},st.its.length
       ?h('div',{class:'tflt-empty'},h('b',null,`Đang ẩn toàn bộ ${st.its.length} lỗi do bộ lọc hiện tại không có mục khớp`),h('small',null,'Bấm nút bên dưới để xóa bộ lọc và hiển thị lại đầy đủ danh sách lỗi chi tiết của mọi ảnh.'),h('button',{type:'button',class:'btn primary',onclick:()=>{resetTF();$('tQ').value='';renderTable()}},`Hiện toàn bộ ${st.its.length} lỗi chi tiết`))
       :h('div',{class:'tflt-empty'},h('b',null,'Chưa có lỗi nào trong đợt đánh giá này'),h('small',null,'Hãy thêm ảnh hiện trường để AI tự động soát lỗi, hoặc mở ảnh để khoanh vùng bổ sung.'))))]));
@@ -1505,7 +1508,7 @@ ${pick.map(({x,d})=>`- [${x.code||'?'}] ${cut(x.item,140)}${x.sign?` | dấu hi�
 
 `;
 }
-function removePhoto(id){Store.del(id);S.photos=S.photos.filter(p=>p.id!==id);if(!S.photos.length)addSample();else if(S.cur===id)S.cur=S.photos[0].id;S.sel=null;renderAll();fit()}
+function removePhoto(id){Store.del(id);S.photos=S.photos.filter(p=>p.id!==id);if(!S.photos.length)addSample();else if(S.cur===id)S.cur=S.photos[0].id;S.sel=null;renderAll();if(typeof renderDesk==='function')renderDesk();fit()}
 
 /* ---------- Hình dạng ---------- */
 function bbox(s){if(s.t==='poly'){const xs=s.pts.map(p=>p[0]),ys=s.pts.map(p=>p[1]),x=Math.min(...xs),y=Math.min(...ys);return{x,y,w:Math.max(...xs)-x,h:Math.max(...ys)-y}}return{x:s.x,y:s.y,w:s.w,h:s.h}}
@@ -1610,7 +1613,7 @@ function focusFinding(f){
   const c=document.querySelector(`.card[data-id="${f.id}"]`);if(c)c.scrollIntoView({block:'nearest'});
 }
 function stepPhoto(dir){
-  const list=S.photos;if(list.length<2)return;
+  const list=typeof rbaSortPhotos==='function'?rbaSortPhotos(S.photos):S.photos;if(list.length<2)return;
   const i=Math.max(0,list.findIndex(p=>p.id===S.cur)),nx=list[(i+dir+list.length)%list.length];
   if(nx)open(nx.id);
 }
@@ -2026,7 +2029,8 @@ function toggleOk(p,f){if(!done(f)){toast('Lỗi chưa có nội dung. Bấm S�
 function renderAllList(){
   if(iTyping()){S.iDirty=true;return}
   const L=$('list'),R=$('sumR');L.replaceChildren();R.replaceChildren();$('side').hidden=true;$('lBack').hidden=true;
-  const real=S.photos.filter(p=>!p.sample),src=real.length?real:S.photos,all=src.flatMap(p=>p.findings);
+  const sortP=typeof rbaSortPhotos==='function'?rbaSortPhotos:a=>a;
+  const real=sortP(S.photos.filter(p=>!p.sample)),src=real.length?real:S.photos,all=src.flatMap(p=>p.findings);
   const tot=all.length,okN=all.filter(f=>f.ok).length,pend=tot-okN;
   $('sumT').textContent=tot?`Xác nhận lỗi: ${okN}/${tot} lỗi đã xác nhận`:'Xác nhận lỗi';
   if(tot)R.append(h('div',{class:'prog wide',style:'width:100%',title:`${okN}/${tot} lỗi đã xác nhận`},h('span',{style:`width:${okN/tot*100}%`})),
@@ -2072,18 +2076,21 @@ function renderAllList(){
     const cols=colorsOf(p.findings.map(f=>({f}))),okP=p.findings.filter(f=>f.ok).length,pdP=p.findings.length-okP;
     const st=p.bgRun?'AI đang soát…':!p.analysis&&!p.findings.length?'Chưa soát':p.findings.length?`${p.findings.length} lỗi · ${pdP?`${pdP} chờ xác nhận`:'✓ đã xác nhận hết'}`:'Không có lỗi';
     L.append(h('section',{class:'agrp2'},
-      h('button',{class:'agh2',onclick:()=>{S.listAll=false;S.cur=p.id;S.sel=null;renderAll();fit();if(isMobile())setView('review');else setDView('review')}},
-        p.thumb?h('img',{src:p.thumb,alt:''}):h('span'),h('span',null,h('b',null,`Ảnh ${pi+1}: ${p.area||p.name}`),h('small',null,st)),h('span',{class:'go'},'Xem ảnh ›')),
+      h('div',{class:'agh2-w'},
+        h('button',{class:'agh2',onclick:()=>{S.listAll=false;S.cur=p.id;S.sel=null;renderAll();fit();if(isMobile())setView('review');else setDView('review')}},
+          p.thumb?h('img',{src:p.thumb,alt:''}):h('span'),h('span',null,h('b',null,`Ảnh ${pi+1}: ${p.area||p.name}`),h('small',null,st)),h('span',{class:'go'},'Xem ảnh ›')),
+        !p.sample&&typeof rbaDelPhotoBtn==='function'?rbaDelPhotoBtn(p):null),
       its.length?its.map(({f,n})=>{const on=!!S.fsel&&S.fsel.has(f.id),tog=()=>{on?S.fsel.delete(f.id):S.fsel.add(f.id);renderList()};
         return h('div',{class:'arow2'+(f.ok?' ok':'')+(on?' picked':''),'data-fid':f.id},
           h('div',{class:'ar-top'+(S.fsel?' sel':''),onclick:()=>S.fsel?tog():iToggle(f)},
             S.fsel?h('button',{class:'fchk','aria-pressed':String(on),'aria-label':(on?'Bỏ chọn lỗi ':'Chọn lỗi ')+n,text:on?'✓':''}):null,
             h('span',{class:'bdg '+(f.sev||'none'),style:`background:${cols[f.id][0]};color:${cols[f.id][1]}`,text:String(n)}),
             h('div',{class:'ar-t'},h('b',null,f.pending?'AI đang xác định lỗi…':(f.title||'Chưa có nội dung lỗi')),
-              h('div',{class:'ar-m'},f.sev?h('span',{class:'pill '+f.sev},f.sev):h('span',{class:'tag'},'Chưa có mức độ'),h('span',{class:'tag'},f.req||f.code||'Chưa có mã'),h('span',{class:'tag'},KINDS[kindOf(f)]),f.mand?h('span',{class:'tag mand'},'Mandatory'):null,dupTag(p,f)))),
+              h('div',{class:'ar-m'},f.sev?h('span',{class:'pill '+f.sev},f.sev):h('span',{class:'tag'},'Chưa có mức độ'),typeof rbaQuick==='function'?rbaQuick(p,f,true):h('span',{class:'tag'},f.req||f.code||'Chưa có mã'),h('span',{class:'tag'},KINDS[kindOf(f)]),f.mand?h('span',{class:'tag mand'},'Mandatory'):null,dupTag(p,f)))),
           S.fsel?null:h('div',{class:'ar-a'},h('span',{class:'st-pill '+(f.ok?'ok':'pend')},f.ok?'✓ Đã xác nhận':'⏳ Chờ xác nhận'),
             h('button',{class:'btn sm'+(S.ied===f.id?' is-open':''),onclick:()=>iToggle(f)},S.ied===f.id?'Đang sửa ▴':'Sửa'),
-            f.ok?h('button',{class:'btn sm btn-unok',onclick:()=>toggleOk(p,f)},'↺ Bỏ xác nhận'):h('button',{class:'btn sm btn-cfm',onclick:()=>toggleOk(p,f)},'Xác nhận')),S.ied===f.id&&!S.fsel?iEditor(p,f,n):null)}):
+            f.ok?h('button',{class:'btn sm btn-unok',onclick:()=>toggleOk(p,f)},'↺ Bỏ xác nhận'):h('button',{class:'btn sm btn-cfm',onclick:()=>toggleOk(p,f)},'Xác nhận'),
+            typeof rbaDelBtn==='function'?rbaDelBtn(p,f):null),S.ied===f.id&&!S.fsel?iEditor(p,f,n):null)}):
         h('p',{class:'anone2'},p.bgRun?'AI đang soát ảnh này…':p.analysis?'AI không thấy lỗi trong ảnh này.':'Ảnh chưa được soát.'),
       p.sample||p.bgRun||S.fsel?null:h('div',{class:'agfoot'},hintAdd(p))));
   });
@@ -2157,7 +2164,8 @@ function renderThumbs(){
       ...[['all',`Tất cả (${real.length})`],['pend',`⏳ Chờ (${nPend})`],['uns',`Chưa soát (${nUns})`]].map(([k,lb])=>
         h('button',{type:'button','aria-pressed':String((S.pFlt||'all')===k),onclick:()=>{S.pFlt=k;renderThumbs()}},lb)));
   }
-  const vis=S.photos.filter(p=>p.sample||(S.pFlt==='pend'?p.findings.some(f=>done(f)&&!f.ok):S.pFlt==='uns'?!p.analysis&&!p.findings.length&&!p.bgRun:true));
+  const sortP=typeof rbaSortPhotos==='function'?rbaSortPhotos:a=>a;
+  const vis=sortP(S.photos).filter(p=>p.sample||(S.pFlt==='pend'?p.findings.some(f=>done(f)&&!f.ok):S.pFlt==='uns'?!p.analysis&&!p.findings.length&&!p.bgRun:true));
   vis.forEach(p=>{const c=s=>p.findings.filter(f=>f.sev===s).length;
     const ps=!!S.psel&&!p.sample,on2=ps&&S.psel.has(p.id);
     T.append(h('div',{class:'thumb'+(p.id===S.cur&&!S.psel?' on':'')+(on2?' ps':''),'data-pid':p.id},
@@ -2218,9 +2226,9 @@ function wrap(g,text,w){const out=[];for(const para of String(text).split('\n'))
 function drawUniform43(g,im,p,items,fx,fy,FW,FH,mo){
   const A=FW/FH;
   g.save();g.beginPath();g.rect(fx,fy,FW,FH);g.clip();
-  g.fillStyle='#161F29';g.fillRect(fx,fy,FW,FH);
+  g.fillStyle='#FFFFFF';g.fillRect(fx,fy,FW,FH);
   if(p&&p.qxg){g.imageSmoothingQuality='high';g.drawImage(im,fx,fy,FW,FH);g.restore();return}
-  const bs=(items||[]).map(({f})=>bbox(f.s));
+  const bs=(items||[]).filter(x=>x&&x.f&&x.f.s&&!x.f.whole).map(({f})=>bbox(f.s));
   let ux0=0,uy0=0,ux1=p.w,uy1=p.h;
   if(bs.length){
     ux0=Math.min(...bs.map(b=>b.x))*p.w;uy0=Math.min(...bs.map(b=>b.y))*p.h;
@@ -2230,25 +2238,16 @@ function drawUniform43(g,im,p,items,fx,fy,FW,FH,mo){
   const rx0=Math.max(0,ux0-padX),ry0=Math.max(0,uy0-padY),rx1=Math.min(p.w,ux1+padX),ry1=Math.min(p.h,uy1+padY);
   const needW=rx1-rx0,needH=ry1-ry0,maxCw=p.w/p.h>A?p.h*A:p.w,maxCh=maxCw/A,minFrac=mo&&mo.minFrac?mo.minFrac:.78;
   g.imageSmoothingQuality='high';
-  if(needW<=maxCw*1.02&&needH<=maxCh*1.02){
-    const cw=clamp(Math.max(needW,needH*A,maxCw*minFrac),Math.min(maxCw,120),maxCw),ch=cw/A;
-    const midX=bs.length?(rx0+rx1)/2:p.w/2,midY=bs.length?(ry0+ry1)/2:p.h/2;
-    let cx=clamp(midX-cw/2,0,Math.max(0,p.w-cw)),cy=clamp(midY-ch/2,0,Math.max(0,p.h-ch));
-    if(bs.length){
-      if(rx0<cx)cx=Math.max(0,rx0);else if(rx1>cx+cw)cx=Math.min(Math.max(0,p.w-cw),rx1-cw);
-      if(ry0<cy)cy=Math.max(0,ry0);else if(ry1>cy+ch)cy=Math.min(Math.max(0,p.h-ch),ry1-ch);
-    }
-    g.drawImage(im,cx,cy,cw,ch,fx,fy,FW,FH);
-    const kx=FW/cw,ky=FH/ch;
-    if(items&&items.length&&mo)drawMarks(g,items,(u,v)=>[fx+(u*p.w-cx)*kx,fy+(v*p.h-cy)*ky],{...mo,bounds:[fx,fy,fx+FW,fy+FH]});
-  }else{
-    const kCov=Math.max(FW/p.w,FH/p.h);
-    g.save();g.globalAlpha=.28;try{g.filter='blur(18px)'}catch{}
-    g.drawImage(im,fx+(FW-p.w*kCov)/2,fy+(FH-p.h*kCov)/2,p.w*kCov,p.h*kCov);g.restore();
-    const kFit=Math.min(FW/p.w,FH/p.h),dw=p.w*kFit,dh=p.h*kFit,dx=fx+(FW-dw)/2,dy=fy+(FH-dh)/2;
-    g.drawImage(im,dx,dy,dw,dh);
-    if(items&&items.length&&mo)drawMarks(g,items,(u,v)=>[dx+u*dw,dy+v*dh],{...mo,bounds:[dx,dy,dx+dw,dy+dh]});
+  const cw=clamp(Math.max(needW,needH*A,maxCw*minFrac),Math.min(maxCw,120),maxCw),ch=cw/A;
+  const midX=bs.length?(rx0+rx1)/2:p.w/2,midY=bs.length?(ry0+ry1)/2:p.h/2;
+  let cx=clamp(midX-cw/2,0,Math.max(0,p.w-cw)),cy=clamp(midY-ch/2,0,Math.max(0,p.h-ch));
+  if(bs.length){
+    if(rx0<cx)cx=Math.max(0,rx0);else if(rx1>cx+cw)cx=Math.min(Math.max(0,p.w-cw),rx1-cw);
+    if(ry0<cy)cy=Math.max(0,ry0);else if(ry1>cy+ch)cy=Math.min(Math.max(0,p.h-ch),ry1-ch);
   }
+  g.drawImage(im,cx,cy,cw,ch,fx,fy,FW,FH);
+  const kx=FW/cw,ky=FH/ch;
+  if(items&&items.length&&mo)drawMarks(g,items,(u,v)=>[fx+(u*p.w-cx)*kx,fy+(v*p.h-cy)*ky],{...mo,bounds:[fx,fy,fx+FW,fy+FH]});
   g.restore();
 }
 async function reportCanvas(p,L=capLang()){
@@ -2978,8 +2977,9 @@ function uiExtra(){deskSoon();queueMicrotask(renderExportCheck);
   $('btnFind2').disabled=$('btnFind').disabled;$('btnRev').disabled=!any;$('btnPackOut').disabled=!real.length;
   const u=$('mUnit').value.trim();$('chipU').textContent=u||'Nhập thông tin audit';$('chip').classList.toggle('empty',!u);
   $('chipD').textContent=[vnDate($('mDate').value),$('mWho').value.trim()].filter(Boolean).join(' · ');
-  const pIdx=Math.max(0,S.photos.findIndex(x=>x.id===S.cur));
-  if($('pIdxLbl'))$('pIdxLbl').textContent=S.photos.length?`${pIdx+1}/${S.photos.length}`:'0/0';
+  const sortedP=typeof rbaSortPhotos==='function'?rbaSortPhotos(S.photos):S.photos;
+  const pIdx=Math.max(0,sortedP.findIndex(x=>x.id===S.cur));
+  if($('pIdxLbl'))$('pIdxLbl').textContent=sortedP.length?`${pIdx+1}/${sortedP.length}`:'0/0';
   if($('btnPrevP'))$('btnPrevP').disabled=S.photos.length<2;
   if($('btnNextP'))$('btnNextP').disabled=S.photos.length<2;
   const tf=$('topFlow');
@@ -3352,11 +3352,12 @@ async function exportReview(skip){
 }
 
 /* ---------- Gói hiện trường: làm việc nhóm, gộp nhiều người ---------- */
-const FKEYS={sev:'s',title:'s',ev:'s',rule:'s',code:'s',req:'s',law:'s',fixNow:'s',fixRoot:'s',due:'s',src:'s',cause:'s',kind:'s',learnSig:'s',ok:'b',mand:'b',learned:'b',userEdited:'b',conf:'n'};
+const FKEYS={sev:'s',title:'s',ev:'s',rule:'s',code:'s',req:'s',law:'s',fixNow:'s',fixRoot:'s',due:'s',src:'s',cause:'s',kind:'s',learnSig:'s',ok:'b',mand:'b',learned:'b',userEdited:'b',codeManual:'b',conf:'n'};
 const okShape=s=>!!s&&typeof s==='object'&&(s.t==='poly'?Array.isArray(s.pts)&&s.pts.length>2&&s.pts.every(q=>Array.isArray(q)&&q.length===2&&q.every(Number.isFinite)):['rect','ell'].includes(s.t)&&['x','y','w','h'].every(k=>Number.isFinite(s[k])));
 function cleanF(f){const o={};for(const[k,t]of Object.entries(FKEYS)){const v=f[k];if(t==='s'&&typeof v==='string')o[k]=v;else if(t==='b'&&typeof v==='boolean')o[k]=v;else if(t==='n'&&Number.isFinite(v))o[k]=v}
   if(!['ai','manual'].includes(o.src))o.src='manual';if(!SEV.includes(o.sev))o.sev='';if(!KINDS[o.kind])o.kind='violation';
   if(f.ai0&&typeof f.ai0==='object'){o.ai0={};for(const k of['rule','code','req','sev','kind','title'])if(typeof f.ai0[k]==='string')o.ai0[k]=f.ai0[k]}
+  if(Array.isArray(f.xCand))o.xCand=strs(f.xCand);if(Array.isArray(f.xItems))o.xItems=strs(f.xItems);
   const s=f.s.t==='poly'?{t:'poly',pts:f.s.pts.map(q=>[clamp(q[0]),clamp(q[1])])}:{t:f.s.t,x:clamp(f.s.x),y:clamp(f.s.y),w:clamp(f.s.w),h:clamp(f.s.h)};return newFinding(s,o)}
 const strs=a=>Array.isArray(a)?a.filter(x=>typeof x==='string').slice(0,10):[];
 async function exportPack(){

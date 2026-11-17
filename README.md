@@ -78,11 +78,27 @@ App soát ảnh hiện trường EHS theo RBA Guider 8.0.1: AI khoanh vùng và 
 - **AI Gemini (`ai/ai-key.js`, `ai/ai-group.js`):** ghi đúng tên mô hình dự phòng vào nhật ký và thống kê độ chính xác AI; không ghi đè mô hình chính khi chỉ mô hình chế độ Kỹ bị giới hạn; nâng giới hạn ảnh gửi "AI soát lại nhóm" lên đủ 4 vị trí.
 - **Đóng gói 1 lệnh (`build.py`):** tự động dựng PWA, kiểm tra cú pháp toàn bộ mã JS bằng `node --check` trước khi xuất ra `docs/`.
 
+## Tối ưu đánh giá lại, tự học & báo cáo chuẩn 4:3 (v1.6.6 → v1.8.0)
+
+- **Xác nhận lỗi nhanh & trực quan (`rba/rba.js`):**
+  - Cột **Hạng mục (bấm để đổi)** ngay trên từng dòng lỗi (cả máy tính và điện thoại) giúp đổi nhanh mã hạng mục RBA (`BH101` → `CM403` hoặc `EH000 · Lỗi EHS khác`) nếu AI phán định chưa chuẩn.
+  - Nút **`🗑 Xóa`** (bấm 2 lần an toàn; tự ghi vào Sổ tự học nếu loại đề xuất sai của AI) và nút **`⚠ Chọn mã`** khi một ảnh liên quan nhiều hạng mục RBA.
+  - Nút **`×`** xóa nhanh ảnh chọn nhầm ngay trên hình thu nhỏ ở bảng Xác nhận lỗi, dải ảnh bên trái và khung xem ảnh.
+  - Mọi danh sách trong ứng dụng tự động sắp xếp chuẩn theo thứ tự hạng mục từ **`BH101` đến `CM403`**, tiếp theo là **Lỗi EHS khác (`EH000`)** và cuối cùng là **ảnh chưa soát**.
+- **Chuẩn hóa ảnh & bố cục Excel (`Findings.xlsm` & `Doi-chieu-Guider.xlsx`):**
+  - Giữ cố định mẫu checklist, hạng mục, điểm và toàn bộ công thức.
+  - Thiết lập in vừa **1 trang ngang khổ A4** (`fitToWidth=1, fitToHeight=0`).
+  - Mọi ảnh cùng kích thước **`220 × 165` px**, phủ kín khung `4:3` (không viền tối, không nền mờ), căn giữa trong ô hình ảnh, **tối đa 3 ảnh một dòng**, tối đa **8 ảnh/ô** (ảnh cuối ghi `+n` nếu còn nhiều hơn).
+  - Toàn bộ các hàng hạng mục đồng đều chiều cao **`150 pt`**; chỉ tự động tăng chiều cao khi chữ đã thu nhỏ hết cỡ vẫn dài hoặc có nhiều dòng ảnh.
+- **PDF trình chiếu (`exportPdf`):**
+  - Sắp xếp trang ảnh đúng thứ tự hạng mục từ **`BH101` trở đi** (cuối cùng là `Lỗi EHS khác`).
+  - **Mỗi trang là một ảnh của một hạng mục, không gộp**, ảnh phủ kín khung `4:3` sắc nét.
+
 ## Phát hành bản mới
 
 ```bash
-python3 build.py 1.6.5
-git add -A && git commit -m "v1.6.5" && git push
+python3 build.py 1.8.0
+git add -A && git commit -m "v1.8.0" && git push
 ```
 
 Triển khai máy chủ `server/` (Cloudflare Workers + D1 + R2):
